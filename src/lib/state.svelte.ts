@@ -23,6 +23,34 @@ export interface DocState {
   error?: string;
 }
 
+/** Datos de la reunión que el usuario puede capturar en cualquier momento. */
+export interface JobMeta {
+  participants: string;
+  date: string;
+  place: string;
+  notes: string;
+}
+
+export function emptyMeta(): JobMeta {
+  return { participants: "", date: "", place: "", notes: "" };
+}
+
+export function metaToContext(m: JobMeta): string {
+  const lines: string[] = [];
+  if (m.date.trim()) lines.push(`Fecha: ${m.date.trim()}`);
+  if (m.place.trim()) lines.push(`Lugar: ${m.place.trim()}`);
+  if (m.participants.trim()) {
+    const people = m.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean);
+    lines.push(`Participantes: ${people.join(", ")}`);
+  }
+  if (m.notes.trim()) lines.push(`Notas adicionales: ${m.notes.trim()}`);
+  return lines.join("\n");
+}
+
+export function metaFilled(m: JobMeta): boolean {
+  return !!(m.date.trim() || m.place.trim() || m.participants.trim() || m.notes.trim());
+}
+
 export interface Job {
   id: string;
   path: string;
@@ -36,6 +64,7 @@ export interface Job {
   liveSegments: Segment[];
   summary: DocState;
   minutes: DocState;
+  meta: JobMeta;
   startedAt?: number;
   finishedAt?: number;
 }
@@ -100,6 +129,7 @@ function serializeJobs(): string {
     result: j.result,
     summary: j.summary.status === "loading" ? { status: "idle" } : j.summary,
     minutes: j.minutes.status === "loading" ? { status: "idle" } : j.minutes,
+    meta: { participants: j.meta.participants, date: j.meta.date, place: j.meta.place, notes: j.meta.notes },
     startedAt: j.startedAt,
     finishedAt: j.finishedAt,
   }));
@@ -132,6 +162,7 @@ async function restoreJobs() {
     liveSegments: [],
     summary: j.summary ?? { status: "idle" },
     minutes: j.minutes ?? { status: "idle" },
+    meta: { ...emptyMeta(), ...(j.meta ?? {}) },
   }));
   // Recupera resumen/minuta que ya existan en disco (p. ej. tras un reinicio).
   await Promise.all(
@@ -240,6 +271,7 @@ export async function addFiles(paths: string[]) {
       liveSegments: [],
       summary: { status: "idle" },
       minutes: { status: "idle" },
+      meta: emptyMeta(),
     });
   }
   if (!app.selectedJobId && app.jobs.length) app.selectedJobId = app.jobs[0].id;
@@ -345,7 +377,7 @@ export async function generateDoc(job: Job, kind: DocKind) {
   slot.status = "loading";
   slot.error = undefined;
   try {
-    const res = await api.generateDocument(kind, job.result.text, job.result.outputDir, job.result.baseName);
+    const res = await api.generateDocument(kind, job.result.text, job.result.outputDir, job.result.baseName, metaToContext(job.meta));
     slot.status = "done";
     slot.content = res.content;
     slot.path = res.path;

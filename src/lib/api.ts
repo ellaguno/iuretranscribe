@@ -114,8 +114,8 @@ export const api = {
   transcribeFile: (jobId: string, path: string) =>
     invoke<TranscriptResult>("transcribe_file", { request: { jobId, path } }),
   cancelJob: (jobId: string) => invoke<boolean>("cancel_job", { jobId }),
-  generateDocument: (kind: DocKind, text: string, outputDir: string, baseName: string) =>
-    invoke<DocumentResult>("generate_document", { request: { kind, text, outputDir, baseName } }),
+  generateDocument: (kind: DocKind, text: string, outputDir: string, baseName: string, context: string) =>
+    invoke<DocumentResult>("generate_document", { request: { kind, text, outputDir, baseName, context } }),
   loadJobs: () => invoke<string>("load_jobs"),
   saveJobs: (json: string) => invoke<void>("save_jobs", { json }),
   loadDocuments: (outputDir: string, baseName: string) =>

@@ -1,12 +1,15 @@
 <script lang="ts">
   import { api, type DocKind } from "../lib/api";
-  import { app, generateDoc, isActive, toast, type Job } from "../lib/state.svelte";
+  import { app, generateDoc, isActive, metaFilled, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
 
   let { job }: { job: Job } = $props();
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
+  let showMeta = $state(false);
+  let filled = $derived(metaFilled(job.meta));
+  let docsDone = $derived(job.summary.status === "done" || job.minutes.status === "done");
   let listEl = $state<HTMLDivElement | null>(null);
 
   let segments = $derived(job.result ? job.result.segments : job.liveSegments);
@@ -58,6 +61,39 @@
           <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
         {/each}
         <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
+      </div>
+    {/if}
+  </div>
+
+  <div class="meta" class:open={showMeta}>
+    <button class="meta-toggle" onclick={() => (showMeta = !showMeta)} aria-expanded={showMeta}>
+      <Icon name="doc" size={15} />
+      <span>Detalles de la reunión</span>
+      {#if filled}<span class="pill accent">Capturados</span>{:else}<span class="hint">participantes, fecha y lugar para la minuta</span>{/if}
+      <span class="chev" class:up={showMeta}><Icon name="chevron" size={14} /></span>
+    </button>
+    {#if showMeta}
+      <div class="meta-form">
+        <div class="field">
+          <label for="m-date">Fecha</label>
+          <input id="m-date" class="input" placeholder="p. ej. 18 de septiembre de 2026, 10:00" bind:value={job.meta.date} />
+        </div>
+        <div class="field">
+          <label for="m-place">Lugar</label>
+          <input id="m-place" class="input" placeholder="p. ej. Sala de juntas / videollamada" bind:value={job.meta.place} />
+        </div>
+        <div class="field wide">
+          <label for="m-people">Participantes</label>
+          <textarea id="m-people" class="input short" placeholder="Un nombre por línea, con cargo o rol si aplica" bind:value={job.meta.participants}></textarea>
+        </div>
+        <div class="field wide">
+          <label for="m-notes">Notas adicionales</label>
+          <textarea id="m-notes" class="input short" placeholder="Contexto útil para la minuta: asunto, cliente, expediente, acuerdos previos…" bind:value={job.meta.notes}></textarea>
+        </div>
+        <p class="hint wide">
+          Se envían junto con la transcripción al generar el resumen y la minuta.
+          {#if docsDone}Ya se generaron documentos: usa «volver a generar» en su pestaña para aplicar estos cambios.{/if}
+        </p>
       </div>
     {/if}
   </div>
@@ -132,6 +168,15 @@
   .stats span { display: inline-flex; align-items: center; gap: 5px; }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .outputs { display: flex; gap: 6px; flex-shrink: 0; align-items: flex-start; }
+  .meta { border-top: 1px solid var(--border); }
+  .meta-toggle { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 18px; color: var(--text-2); font-weight: 550; text-align: left; }
+  .meta-toggle:hover { background: var(--surface-2); }
+  .meta-toggle .hint { font-weight: 400; }
+  .chev { margin-left: auto; display: inline-flex; transition: transform 0.15s; }
+  .chev.up { transform: rotate(180deg); }
+  .meta-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding: 4px 18px 14px; }
+  .meta-form .wide { grid-column: 1 / -1; }
+  .meta-form textarea.short { min-height: 56px; }
   .tabs { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); }
   .tabs > button:not(.btn) { display: inline-flex; align-items: center; gap: 6px; padding: 10px 10px; color: var(--muted); font-weight: 550; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tabs > button:not(.btn):hover:not(:disabled) { color: var(--text); }

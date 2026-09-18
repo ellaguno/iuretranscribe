@@ -86,6 +86,9 @@ struct DocumentRequest {
     text: String,
     output_dir: String,
     base_name: String,
+    /// Datos aportados por el usuario (participantes, fecha, lugar…).
+    #[serde(default)]
+    context: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -291,7 +294,13 @@ async fn generate_document(state: State<'_, AppState>, request: DocumentRequest)
     if request.text.trim().is_empty() {
         return Err("La transcripción está vacía.".into());
     }
-    let user = format!("{instruction}\n\n{}", request.text);
+    let user = match request.context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        Some(ctx) => format!(
+            "{instruction}\n\nDatos proporcionados por el usuario sobre la reunión (úsalos y dales prioridad sobre lo que se infiera del audio):\n{ctx}\n\nTranscripción:\n\n{}",
+            request.text
+        ),
+        None => format!("{instruction}\n\n{}", request.text),
+    };
     let content = llm::chat(&settings.openrouter_api_key, &settings.openrouter_model, &system, &user).await?;
     let path = PathBuf::from(&request.output_dir).join(format!("{}{suffix}", request.base_name));
     std::fs::write(&path, format!("{content}\n")).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
