@@ -73,9 +73,9 @@ En Linux, la primera vez importa `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` de
 `vX.Y.Z`, publica un borrador de release con instaladores para Linux (CPU y
 CUDA), Windows (CPU y CUDA) y macOS (Apple Silicon con Metal e Intel).
 Los artefactos de cada push (sin etiqueta) quedan en la pestaña Actions del repositorio.
-La variante Linux CUDA se distribuye sólo como `.deb`/`.rpm` (el AppImage no puede
-empaquetar las librerías de CUDA) y requiere el runtime de CUDA 12 instalado
-(`libcudart` y `libcublas`, p. ej. del repositorio apt de NVIDIA).
+Las variantes CUDA incluyen el runtime de CUDA 12 (`cudart`, `cublas`, `cublasLt`)
+dentro del instalador, así que sólo necesitan el driver de NVIDIA. En Linux se
+distribuyen como `.deb`/`.rpm` (el AppImage no puede empaquetar esas librerías).
 
 ## Licencia
 

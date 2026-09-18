@@ -32,7 +32,7 @@ jobs:
             os: ubuntu-22.04
             features: "cuda"
             # Sin AppImage: linuxdeploy no puede resolver las librerías de CUDA.
-            args: "--bundles deb rpm"
+            args: "--bundles deb rpm --config src-tauri/tauri.cuda-linux.conf.json"
           - name: windows-x64
             os: windows-latest
             features: ""
@@ -40,7 +40,7 @@ jobs:
           - name: windows-x64-cuda
             os: windows-2022
             features: "cuda"
-            args: ""
+            args: "--config src-tauri/tauri.cuda-windows.conf.json"
           - name: macos-arm64
             os: macos-latest
             features: "metal"
@@ -84,9 +84,15 @@ jobs:
           non-cuda-sub-packages: '["libcublas-dev"]'
           use-github-cache: false
 
-      - name: rpath a las librerías de CUDA (Linux)
+      # Copia el runtime de CUDA para incluirlo en el .deb/.rpm (/usr/lib/iuretranscribe)
+      # y hace que el binario lo busque ahí primero.
+      - name: Runtime de CUDA como recurso (Linux)
         if: matrix.features == 'cuda' && startsWith(matrix.os, 'ubuntu')
-        run: echo "RUSTFLAGS=-C link-arg=-Wl,-rpath,/usr/local/cuda/lib64" >> "$GITHUB_ENV"
+        run: |
+          mkdir -p src-tauri/cuda-libs
+          cp -L /usr/local/cuda/lib64/libcudart.so.12 /usr/local/cuda/lib64/libcublas.so.12 /usr/local/cuda/lib64/libcublasLt.so.12 src-tauri/cuda-libs/
+          ls -la src-tauri/cuda-libs
+          echo 'RUSTFLAGS=-C link-arg=-Wl,-rpath,$ORIGIN/../lib/iuretranscribe:/usr/local/cuda/lib64' >> "$GITHUB_ENV"
 
       # --- CUDA (Windows): nvcc + cuBLAS; se compila con Ninja + MSVC para no
       # depender de la integración de CUDA con Visual Studio.
@@ -98,6 +104,13 @@ jobs:
           method: network
           sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev"]'
           use-github-cache: false
+      - name: Runtime de CUDA como recurso (Windows)
+        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+        shell: bash
+        run: |
+          mkdir -p src-tauri/cuda-libs
+          cp "$CUDA_PATH"/bin/cudart64_12.dll "$CUDA_PATH"/bin/cublas64_12.dll "$CUDA_PATH"/bin/cublasLt64_12.dll src-tauri/cuda-libs/
+          ls -la src-tauri/cuda-libs
       - name: Entorno MSVC
         if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1
@@ -117,7 +130,7 @@ jobs:
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('IureTranscribe {0}', github.ref_name) || '' }}
-          releaseBody: "Instaladores generados automáticamente. Las variantes *cuda* requieren una GPU NVIDIA con drivers recientes (en Linux, además el runtime de CUDA 12: libcudart y libcublas). Las demás funcionan en cualquier equipo: CPU, o Metal en Mac con Apple Silicon."
+          releaseBody: "Instaladores generados automáticamente. Las variantes *cuda* incluyen el runtime de CUDA 12 y sólo requieren una GPU NVIDIA con driver reciente (≥ 525). Las demás funcionan en cualquier equipo: CPU, o Metal en Mac con Apple Silicon."
           releaseDraft: true
           prerelease: false
 

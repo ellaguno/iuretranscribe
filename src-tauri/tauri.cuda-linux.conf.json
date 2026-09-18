@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "cuda-libs/libcudart.so.12": "libcudart.so.12",
+      "cuda-libs/libcublas.so.12": "libcublas.so.12",
+      "cuda-libs/libcublasLt.so.12": "libcublasLt.so.12"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "cuda-libs/cudart64_12.dll": "cudart64_12.dll",
+      "cuda-libs/cublas64_12.dll": "cublas64_12.dll",
+      "cuda-libs/cublasLt64_12.dll": "cublasLt64_12.dll"
+    }
+  }
+}
