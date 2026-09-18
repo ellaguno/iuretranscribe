@@ -9,11 +9,26 @@ línea de comandos con una interfaz gráfica.
   (modelos GGML, se descargan desde la propia app).
 - Cola de archivos con arrastrar y soltar, progreso en vivo y segmentos en tiempo real.
 - Salida en SRT, VTT, TXT y JSON, junto al archivo original o en una carpeta fija.
-- Resumen y minuta en Markdown (OpenRouter, con instrucciones editables).
+- Resumen y minuta en Markdown (OpenRouter, con instrucciones editables), con
+  detalles de la reunión (participantes, fecha, lugar, notas) capturables en
+  cualquier momento.
+- Grabación integrada del micrófono y del audio del sistema (videollamadas,
+  reuniones en el navegador) con transcripción automática al detener.
 - Aceleración por GPU: CUDA (Linux/Windows), Metal (macOS) o Vulkan, según la
   variante compilada. La variante CPU funciona en cualquier equipo.
 - Decodifica MP3, WAV, M4A/AAC, MP4, MOV, MKV, FLAC y OGG sin dependencias; si
   `ffmpeg` está instalado, también Opus, WebM y otros formatos.
+
+## Grabación
+
+| Plataforma | Micrófono | Audio del sistema (bocina) |
+| --- | --- | --- |
+| Linux | PipeWire (`pw-record`) o PulseAudio (`parec`) | Monitor de la salida predeterminada |
+| Windows | WASAPI (cpal) | Loopback WASAPI de la salida predeterminada |
+| macOS | CoreAudio (cpal) | Requiere un dispositivo virtual (p. ej. BlackHole) elegido como micrófono |
+
+Las grabaciones se guardan como WAV mono de 16 kHz en `Música/IureTranscribe`
+(configurable) y, si así se indica, se agregan a la cola y se transcriben solas.
 
 ## Stack
 

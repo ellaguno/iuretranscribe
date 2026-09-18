@@ -2,7 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
+  type DeviceList,
   type DocKind,
+  type RecordingStatus,
   type DownloadProgress,
   type ModelInfo,
   type ProgressEvent,
@@ -13,7 +15,7 @@ import {
   type TranscriptResult,
 } from "./api";
 
-export type View = "transcribe" | "models" | "settings";
+export type View = "transcribe" | "record" | "models" | "settings";
 export type JobStatus = "queued" | "decoding" | "loading" | "transcribing" | "done" | "error" | "cancelled";
 
 export interface DocState {
@@ -93,6 +95,11 @@ export const app = $state({
   downloads: {} as Record<string, DownloadState>,
   toasts: [] as Toast[],
   now: Date.now(),
+  devices: null as DeviceList | null,
+  recording: { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null } as RecordingStatus,
+  recordingBusy: false,
+  /** Detalles capturados durante la grabación; se adjuntan al trabajo al detenerla. */
+  pendingMeta: { participants: "", date: "", place: "", notes: "" } as JobMeta,
 });
 
 let toastSeq = 0;
@@ -190,6 +197,9 @@ export async function init() {
   applyTheme();
   await restoreJobs();
   startPersistence();
+  pollRecording().then(() => {
+    if (app.recording.active && !pollTimer) pollTimer = setInterval(pollRecording, 250);
+  });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 
   await listen<ProgressEvent>("job-progress", (e) => {
@@ -250,17 +260,18 @@ export function downloadedModels(): ModelInfo[] {
   return app.models.filter((m) => m.downloaded);
 }
 
-export async function addFiles(paths: string[]) {
+export async function addFiles(paths: string[]): Promise<Job[]> {
   const fresh = paths.filter((p) => !app.jobs.some((j) => j.path === p));
-  if (!fresh.length) return;
+  if (!fresh.length) return [];
   const probes = await api.probeFiles(fresh);
   let skipped = 0;
+  const added: Job[] = [];
   for (const p of probes) {
     if (!p.supported) {
       skipped++;
       continue;
     }
-    app.jobs.push({
+    added.push({
       id: crypto.randomUUID(),
       path: p.path,
       name: p.name,
@@ -274,9 +285,75 @@ export async function addFiles(paths: string[]) {
       meta: emptyMeta(),
     });
   }
+  app.jobs.push(...added);
   if (!app.selectedJobId && app.jobs.length) app.selectedJobId = app.jobs[0].id;
   if (skipped) toast(`${skipped} archivo(s) omitido(s): formato no compatible`, "error");
   app.view = "transcribe";
+  return app.jobs.filter((j) => added.some((a) => a.id === j.id));
+}
+
+// ---------------------------------------------------------------------------
+// Grabación
+// ---------------------------------------------------------------------------
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+export async function loadDevices() {
+  try {
+    app.devices = await api.listAudioDevices();
+  } catch (e) {
+    toast(`No se pudieron listar los dispositivos de audio: ${e}`, "error");
+  }
+}
+
+async function pollRecording() {
+  try {
+    app.recording = await api.recordingStatus();
+  } catch {
+    /* ignorar */
+  }
+  if (!app.recording.active) stopPolling();
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = undefined;
+}
+
+export async function startRecording() {
+  if (app.recordingBusy || app.recording.active) return;
+  app.recordingBusy = true;
+  try {
+    await api.startRecording();
+    await pollRecording();
+    if (!pollTimer) pollTimer = setInterval(pollRecording, 250);
+  } catch (e) {
+    toast(String(e), "error", 8000);
+  } finally {
+    app.recordingBusy = false;
+  }
+}
+
+export async function stopRecording() {
+  if (app.recordingBusy || !app.recording.active) return;
+  app.recordingBusy = true;
+  stopPolling();
+  try {
+    const res = await api.stopRecording();
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null };
+    const [job] = await addFiles([res.path]);
+    if (job) {
+      job.meta = { ...app.pendingMeta };
+      app.selectedJobId = job.id;
+    }
+    app.pendingMeta = emptyMeta();
+    toast(`Grabación guardada (${Math.round(res.durationSecs)} s)`, "success");
+    if (app.settings?.autoTranscribeRecording) await startQueue();
+  } catch (e) {
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null };
+    toast(String(e), "error", 9000);
+  } finally {
+    app.recordingBusy = false;
+  }
 }
 
 export function removeJob(id: string) {

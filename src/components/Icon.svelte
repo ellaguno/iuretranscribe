@@ -32,6 +32,9 @@
     moon: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z",
     monitor: "M2 4h20v12H2zM8 20h8M12 16v4",
     chevron: "m6 9 6 6 6-6",
+    dot: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z",
+    stopfill: "M7 7h10v10H7z",
+    speaker: "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
     globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z",
     demo: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM10 8l5 2.5L10 13zM8 21h8M12 17v4",
     youtube: "M22.5 7.2a2.8 2.8 0 0 0-2-2C18.8 4.8 12 4.8 12 4.8s-6.8 0-8.5.4a2.8 2.8 0 0 0-2 2A29 29 0 0 0 1 12a29 29 0 0 0 .5 4.8 2.8 2.8 0 0 0 2 2c1.7.4 8.5.4 8.5.4s6.8 0 8.5-.4a2.8 2.8 0 0 0 2-2A29 29 0 0 0 23 12a29 29 0 0 0-.5-4.8zM9.8 15.1V8.9L15.5 12z",
@@ -51,5 +54,5 @@
   aria-hidden="true"
   style="flex-shrink:0"
 >
-  <path d={paths[name] ?? paths.info} />
+  <path d={paths[name] ?? paths.info} fill={name === "dot" || name === "stopfill" ? "currentColor" : "none"} />
 </svg>

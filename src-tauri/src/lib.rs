@@ -1,11 +1,13 @@
 mod audio;
 mod llm;
 mod models;
+mod recorder;
 mod settings;
 mod subtitles;
 mod transcribe;
 
 use models::{Downloads, ModelInfo};
+use recorder::Recorder;
 use serde::{Deserialize, Serialize};
 use settings::Settings;
 use std::collections::HashMap;
@@ -21,6 +23,8 @@ pub struct AppState {
     settings_path: PathBuf,
     jobs_path: PathBuf,
     models_dir: PathBuf,
+    recordings_default: PathBuf,
+    recorder: Arc<Recorder>,
     settings: Mutex<Settings>,
     downloads: Arc<Downloads>,
     engine: Arc<Engine>,
@@ -36,6 +40,7 @@ struct SystemInfo {
     models_dir: String,
     settings_path: String,
     ffmpeg_available: bool,
+    recordings_dir: String,
     version: &'static str,
     supported_extensions: &'static [&'static str],
 }
@@ -118,6 +123,7 @@ fn system_info(state: State<'_, AppState>) -> SystemInfo {
         models_dir: state.models_dir.to_string_lossy().into_owned(),
         settings_path: state.settings_path.to_string_lossy().into_owned(),
         ffmpeg_available: ffmpeg_available(),
+        recordings_dir: recordings_dir(&state).to_string_lossy().into_owned(),
         version: env!("CARGO_PKG_VERSION"),
         supported_extensions: audio::SUPPORTED_EXTENSIONS,
     }
@@ -340,6 +346,50 @@ fn load_documents(output_dir: String, base_name: String) -> DocumentsOnDisk {
     DocumentsOnDisk { summary: read("_resumen.md", "summary"), minutes: read("_minuta.md", "minutes") }
 }
 
+fn recordings_dir(state: &AppState) -> PathBuf {
+    let settings = state.settings.lock().unwrap();
+    match settings.recordings_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => PathBuf::from(d),
+        None => state.recordings_default.clone(),
+    }
+}
+
+#[tauri::command]
+fn list_audio_devices() -> recorder::DeviceList {
+    recorder::list_devices()
+}
+
+#[tauri::command]
+async fn start_recording(state: State<'_, AppState>) -> Result<String, String> {
+    let settings = state.settings.lock().unwrap().clone();
+    let opts = recorder::StartOptions {
+        capture_mic: settings.record_mic,
+        mic_device: settings.mic_device.clone(),
+        capture_system: settings.record_system,
+        output_dir: recordings_dir(&state),
+    };
+    let rec = state.recorder.clone();
+    tauri::async_runtime::spawn_blocking(move || rec.start(opts))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn stop_recording(state: State<'_, AppState>) -> Result<recorder::RecordingResult, String> {
+    let rec = state.recorder.clone();
+    tauri::async_runtime::spawn_blocking(move || rec.stop())
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn recording_status(state: State<'_, AppState>) -> recorder::RecordingStatus {
+    state.recorder.status()
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -373,6 +423,8 @@ pub fn run() {
             app.manage(AppState {
                 settings_path,
                 jobs_path: data_dir.join("jobs.json"),
+                recordings_default: dirs::audio_dir().unwrap_or_else(|| data_dir.clone()).join("IureTranscribe"),
+                recorder: Arc::new(Recorder::default()),
                 models_dir,
                 settings: Mutex::new(settings),
                 downloads: Arc::new(Downloads::default()),
@@ -397,6 +449,10 @@ pub fn run() {
             load_jobs,
             save_jobs,
             load_documents,
+            list_audio_devices,
+            start_recording,
+            stop_recording,
+            recording_status,
             open_path,
             reveal_path,
             read_text_file,

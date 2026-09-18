@@ -1,0 +1,154 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { api } from "../lib/api";
+  import { app, loadDevices, saveSettings, startRecording, stopRecording, toast } from "../lib/state.svelte";
+  import { fmtDuration } from "../lib/format";
+  import Icon from "./Icon.svelte";
+  import MetaForm from "./MetaForm.svelte";
+
+  let s = $derived(app.settings!);
+  let rec = $derived(app.recording);
+  let devices = $derived(app.devices);
+  let sysUnavailable = $derived(devices?.systemCapture === "unavailable");
+  let canRecord = $derived((s.recordMic || (s.recordSystem && !sysUnavailable)) && !app.recordingBusy);
+  let isLinux = $derived(app.sys?.platform === "linux");
+
+  onMount(() => {
+    if (!app.devices) loadDevices();
+  });
+
+  async function pickDir() {
+    const dir = await open({ directory: true, title: "Carpeta de grabaciones" });
+    if (typeof dir === "string") {
+      await saveSettings({ recordingsDir: dir });
+      app.sys = await api.systemInfo();
+    }
+  }
+  function openDir() {
+    if (app.sys) api.openPath(app.sys.recordingsDir).catch((e) => toast(String(e), "error"));
+  }
+</script>
+
+<header class="top">
+  <div>
+    <h1>Grabar</h1>
+    <p class="hint">Graba el micrófono y lo que suena en la bocina (videollamadas, reuniones) y transcribe al terminar.</p>
+  </div>
+</header>
+
+<div class="content scroll">
+  <div class="card rec" class:live={rec.active}>
+    <div class="rec-main">
+      <button class="rec-btn" class:stop={rec.active} disabled={!canRecord && !rec.active} onclick={() => (rec.active ? stopRecording() : startRecording())} aria-label={rec.active ? "Detener" : "Grabar"}>
+        {#if app.recordingBusy}
+          <span class="spin"><Icon name="loader" size={30} /></span>
+        {:else if rec.active}
+          <Icon name="stopfill" size={30} />
+        {:else}
+          <Icon name="dot" size={30} />
+        {/if}
+      </button>
+      <div class="rec-info">
+        {#if rec.active}
+          <div class="timer">{fmtDuration(rec.elapsedSecs)}</div>
+          <div class="hint">Grabando… pulsa para detener{s.autoTranscribeRecording ? " y transcribir" : ""}.</div>
+        {:else}
+          <div class="timer idle">00:00</div>
+          <div class="hint">{canRecord ? "Pulsa para iniciar la grabación." : "Activa al menos una fuente para grabar."}</div>
+        {/if}
+        {#if rec.error}<div class="err"><Icon name="alert" size={14} /> {rec.error}</div>{/if}
+      </div>
+    </div>
+    <div class="meters">
+      <div class="meter" class:off={!s.recordMic}>
+        <span><Icon name="mic" size={14} /> Micrófono</span>
+        <div class="bar"><div style="width:{Math.round(rec.micLevel * 100)}%"></div></div>
+      </div>
+      <div class="meter" class:off={!s.recordSystem || sysUnavailable}>
+        <span><Icon name="speaker" size={14} /> Sistema</span>
+        <div class="bar"><div style="width:{Math.round(rec.sysLevel * 100)}%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2><Icon name="settings" size={16} /> Fuentes</h2>
+      <div class="switchrow">
+        <div>
+          <span class="label">Micrófono</span>
+          {#if !isLinux && devices && devices.inputs.length}
+            <select class="input small" value={s.micDevice ?? "default"} disabled={rec.active} onchange={(e) => saveSettings({ micDevice: (e.target as HTMLSelectElement).value === "default" ? null : (e.target as HTMLSelectElement).value })}>
+              <option value="default">Predeterminado del sistema</option>
+              {#each devices.inputs as d}<option value={d.id}>{d.name}{d.isDefault ? " (predeterminado)" : ""}</option>{/each}
+            </select>
+          {:else}
+            <p class="hint">Se usa el micrófono predeterminado del sistema.</p>
+          {/if}
+        </div>
+        <button class="switch" class:on={s.recordMic} aria-label="Grabar micrófono" disabled={rec.active} onclick={() => saveSettings({ recordMic: !s.recordMic })}></button>
+      </div>
+      <div class="switchrow">
+        <div>
+          <span class="label">Audio del sistema (bocina)</span>
+          <p class="hint">{devices?.note ?? "…"}</p>
+        </div>
+        <button class="switch" class:on={s.recordSystem && !sysUnavailable} aria-label="Grabar audio del sistema" disabled={rec.active || sysUnavailable} onclick={() => saveSettings({ recordSystem: !s.recordSystem })}></button>
+      </div>
+      <div class="switchrow">
+        <div>
+          <span class="label">Transcribir automáticamente al detener</span>
+          <p class="hint">La grabación se agrega a la cola y se procesa con el modelo seleccionado.</p>
+        </div>
+        <button class="switch" class:on={s.autoTranscribeRecording} aria-label="Transcribir automáticamente" onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
+      </div>
+      <div class="dir">
+        <span class="label">Carpeta de grabaciones</span>
+        <div class="row">
+          <span class="path" title={app.sys?.recordingsDir}>{app.sys?.recordingsDir}</span>
+          <button class="btn sm ghost" onclick={openDir} title="Abrir carpeta"><Icon name="folder" size={14} /></button>
+          <button class="btn sm" onclick={pickDir} disabled={rec.active}>Cambiar</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><Icon name="doc" size={16} /> Detalles de la reunión</h2>
+      <MetaForm bind:meta={app.pendingMeta} hint="Puedes llenarlos mientras grabas; se adjuntan a la grabación y se usan para el resumen y la minuta." />
+    </section>
+  </div>
+</div>
+
+<style>
+  .top { padding: 22px 26px 14px; }
+  .content { flex: 1; min-height: 0; padding: 0 26px 26px; display: flex; flex-direction: column; gap: 14px; }
+  .rec { padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; transition: border-color 0.2s; }
+  .rec.live { border-color: var(--danger); }
+  .rec-main { display: flex; align-items: center; gap: 22px; }
+  .rec-btn { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; background: var(--danger); color: #fff; box-shadow: 0 6px 18px color-mix(in srgb, var(--danger) 40%, transparent); transition: transform 0.1s, filter 0.15s; flex-shrink: 0; }
+  .rec-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .rec-btn:active:not(:disabled) { transform: scale(0.96); }
+  .rec-btn.stop { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 16px transparent; } }
+  .spin { display: inline-flex; animation: spin 1s linear infinite; }
+  .timer { font-size: 38px; font-weight: 650; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .timer.idle { color: var(--muted); }
+  .err { margin-top: 6px; color: var(--warn); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  .meters { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .meter { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-2); }
+  .meter span { display: inline-flex; align-items: center; gap: 6px; }
+  .meter.off { opacity: 0.4; }
+  .bar { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+  .bar > div { height: 100%; background: linear-gradient(90deg, var(--success), var(--warn) 80%, var(--danger)); transition: width 0.12s linear; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  section { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+  section h2 { display: flex; align-items: center; gap: 8px; }
+  .switchrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .switchrow > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .input.small { margin-top: 2px; }
+  .dir { display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .path { flex: 1; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+</style>

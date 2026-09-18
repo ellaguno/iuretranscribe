@@ -33,6 +33,13 @@ pub struct Settings {
     pub minutes_prompt: String,
     /// "system" | "light" | "dark"
     pub theme: String,
+    /// Carpeta donde se guardan las grabaciones (None = Música/IureTranscribe).
+    pub recordings_dir: Option<String>,
+    pub record_mic: bool,
+    pub record_system: bool,
+    /// Id del micrófono (cpal) o None = predeterminado.
+    pub mic_device: Option<String>,
+    pub auto_transcribe_recording: bool,
 }
 
 impl Default for Settings {
@@ -54,6 +61,11 @@ impl Default for Settings {
             summary_prompt: DEFAULT_SUMMARY_PROMPT.into(),
             minutes_prompt: DEFAULT_MINUTES_PROMPT.into(),
             theme: "system".into(),
+            recordings_dir: None,
+            record_mic: true,
+            record_system: true,
+            mic_device: None,
+            auto_transcribe_recording: true,
         }
     }
 }

@@ -14,6 +14,7 @@
 
   const items: { id: View; label: string; icon: string }[] = [
     { id: "transcribe", label: "Transcribir", icon: "waveform" },
+    { id: "record", label: "Grabar", icon: "mic" },
     { id: "models", label: "Modelos", icon: "layers" },
     { id: "settings", label: "Ajustes", icon: "settings" },
   ];
@@ -37,6 +38,9 @@
         <span>{it.label}</span>
         {#if it.id === "transcribe" && active > 0}
           <span class="badge">{active}</span>
+        {/if}
+        {#if it.id === "record" && app.recording.active}
+          <span class="recdot" title="Grabando"></span>
         {/if}
       </button>
     {/each}
@@ -82,6 +86,8 @@
   nav button { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; color: var(--text-2); font-weight: 550; text-align: left; }
   nav button:hover { background: var(--surface-2); }
   nav button.active { background: var(--accent-soft); color: var(--accent); }
+  .recdot { margin-left: auto; width: 9px; height: 9px; border-radius: 50%; background: var(--danger); animation: blink 1.2s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
   .badge { margin-left: auto; font-size: 11px; background: var(--accent); color: var(--accent-text); border-radius: 999px; padding: 1px 7px; }
   .links { margin-top: auto; display: flex; flex-direction: column; gap: 1px; padding: 6px 0; }
   .links-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }

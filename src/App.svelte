@@ -4,6 +4,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import TranscribeView from "./components/TranscribeView.svelte";
   import ModelsView from "./components/ModelsView.svelte";
+  import RecordView from "./components/RecordView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
   import Toasts from "./components/Toasts.svelte";
   import Icon from "./components/Icon.svelte";
@@ -24,6 +25,8 @@
     <main>
       {#if app.view === "transcribe"}
         <TranscribeView />
+      {:else if app.view === "record"}
+        <RecordView />
       {:else if app.view === "models"}
         <ModelsView />
       {:else}

@@ -191,19 +191,14 @@ pub fn hidden_command(program: &str) -> Command {
     cmd
 }
 
-/// Remuestreo por sinc enventanado (Blackman) con tabla de fases.
-pub fn resample(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
-    if src_rate == dst_rate || input.is_empty() {
-        return input.to_vec();
-    }
-    const HALF_TAPS: i64 = 32;
-    const PHASES: usize = 128;
-    let ratio = dst_rate as f64 / src_rate as f64; // salida / entrada
-    let cutoff = 0.5 * ratio.min(1.0) * 0.96; // ciclos por muestra de entrada
+const HALF_TAPS: i64 = 32;
+const PHASES: usize = 128;
+const TAPS: usize = (2 * HALF_TAPS) as usize;
 
-    // tabla[fase][tap]: h(k - frac) para k en -HALF_TAPS+1 ..= HALF_TAPS
-    let taps = (2 * HALF_TAPS) as usize;
-    let mut table = vec![0f32; PHASES * taps];
+/// Tabla de fases del filtro sinc enventanado (Blackman): tabla[fase * TAPS + tap].
+fn build_table(ratio: f64) -> Vec<f32> {
+    let cutoff = 0.5 * ratio.min(1.0) * 0.96; // ciclos por muestra de entrada
+    let mut table = vec![0f32; PHASES * TAPS];
     for p in 0..PHASES {
         let frac = p as f64 / PHASES as f64;
         let mut sum = 0f64;
@@ -214,35 +209,85 @@ pub fn resample(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
             let arg = 2.0 * cutoff * t;
             let sinc = if arg.abs() < 1e-9 { 1.0 } else { (std::f64::consts::PI * arg).sin() / (std::f64::consts::PI * arg) };
             let h = 2.0 * cutoff * sinc * w;
-            table[p * taps + i] = h as f32;
+            table[p * TAPS + i] = h as f32;
             sum += h;
         }
         if sum.abs() > 1e-12 {
-            for i in 0..taps {
-                table[p * taps + i] /= sum as f32;
+            for i in 0..TAPS {
+                table[p * TAPS + i] /= sum as f32;
             }
         }
     }
+    table
+}
 
+#[inline]
+fn interpolate(table: &[f32], input: &[f32], pos: f64) -> f32 {
+    let n = input.len() as i64;
+    let n0 = pos.floor() as i64;
+    let frac = pos - n0 as f64;
+    let phase = ((frac * PHASES as f64).round() as usize).min(PHASES - 1);
+    let row = &table[phase * TAPS..(phase + 1) * TAPS];
+    let mut acc = 0f32;
+    for (j, k) in (-HALF_TAPS + 1..=HALF_TAPS).enumerate() {
+        let idx = n0 + k;
+        if idx >= 0 && idx < n {
+            acc += input[idx as usize] * row[j];
+        }
+    }
+    acc
+}
+
+/// Remuestreo por sinc enventanado (Blackman) con tabla de fases.
+pub fn resample(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
+    if src_rate == dst_rate || input.is_empty() {
+        return input.to_vec();
+    }
+    let ratio = dst_rate as f64 / src_rate as f64; // salida / entrada
+    let table = build_table(ratio);
     let out_len = ((input.len() as f64) * ratio).floor() as usize;
     let mut out = Vec::with_capacity(out_len);
-    let n = input.len() as i64;
     for i in 0..out_len {
-        let pos = i as f64 / ratio;
-        let n0 = pos.floor() as i64;
-        let frac = pos - n0 as f64;
-        let phase = ((frac * PHASES as f64).round() as usize).min(PHASES - 1);
-        let row = &table[phase * taps..(phase + 1) * taps];
-        let mut acc = 0f32;
-        for (j, k) in (-HALF_TAPS + 1..=HALF_TAPS).enumerate() {
-            let idx = n0 + k;
-            if idx >= 0 && idx < n {
-                acc += input[idx as usize] * row[j];
-            }
-        }
-        out.push(acc);
+        out.push(interpolate(&table, input, i as f64 / ratio));
     }
     out
+}
+
+/// Remuestreador incremental (para captura en vivo con cpal en Windows/macOS): acepta bloques de
+/// cualquier tamaño y mantiene el estado entre llamadas.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub struct StreamResampler {
+    ratio: f64,
+    table: Vec<f32>,
+    buf: Vec<f32>,
+    pos: f64,
+    passthrough: bool,
+}
+
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+impl StreamResampler {
+    pub fn new(src_rate: u32, dst_rate: u32) -> Self {
+        let ratio = dst_rate as f64 / src_rate as f64;
+        Self { ratio, table: build_table(ratio), buf: Vec::new(), pos: 0.0, passthrough: src_rate == dst_rate }
+    }
+
+    pub fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
+        if self.passthrough {
+            out.extend_from_slice(input);
+            return;
+        }
+        self.buf.extend_from_slice(input);
+        let n = self.buf.len() as i64;
+        while (self.pos.floor() as i64) + HALF_TAPS < n {
+            out.push(interpolate(&self.table, &self.buf, self.pos));
+            self.pos += 1.0 / self.ratio;
+        }
+        let keep_from = (self.pos.floor() as i64 - HALF_TAPS).max(0) as usize;
+        if keep_from > 0 {
+            self.buf.drain(..keep_from);
+            self.pos -= keep_from as f64;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +317,22 @@ mod tests {
         assert!((f - 440.0).abs() < 5.0, "frecuencia {f}");
         let peak = out.iter().fold(0f32, |m, v| m.max(v.abs()));
         assert!(peak > 0.9 && peak < 1.05, "amplitud {peak}");
+    }
+
+    #[test]
+    fn stream_resampler_matches_batch() {
+        let src = 44_100u32;
+        let input: Vec<f32> = (0..44_100).map(|i| (2.0 * std::f64::consts::PI * 300.0 * i as f64 / src as f64).sin() as f32).collect();
+        let batch = resample(&input, src, TARGET_RATE);
+        let mut rs = StreamResampler::new(src, TARGET_RATE);
+        let mut streamed = Vec::new();
+        for chunk in input.chunks(1000) {
+            rs.process(chunk, &mut streamed);
+        }
+        assert!((batch.len() as i64 - streamed.len() as i64).abs() < 64, "{} vs {}", batch.len(), streamed.len());
+        let n = batch.len().min(streamed.len()) - 100;
+        let max_diff = (100..n).map(|i| (batch[i] - streamed[i]).abs()).fold(0f32, f32::max);
+        assert!(max_diff < 1e-3, "diferencia máxima {max_diff}");
     }
 
     #[test]

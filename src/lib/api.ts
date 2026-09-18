@@ -17,6 +17,11 @@ export interface Settings {
   summaryPrompt: string;
   minutesPrompt: string;
   theme: "system" | "light" | "dark";
+  recordingsDir: string | null;
+  recordMic: boolean;
+  recordSystem: boolean;
+  micDevice: string | null;
+  autoTranscribeRecording: boolean;
 }
 
 export interface ModelInfo {
@@ -39,6 +44,7 @@ export interface SystemInfo {
   modelsDir: string;
   settingsPath: string;
   ffmpegAvailable: boolean;
+  recordingsDir: string;
   version: string;
   supportedExtensions: string[];
 }
@@ -101,7 +107,38 @@ export interface SegmentEvent {
   segment: Segment;
 }
 
+export interface AudioDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface DeviceList {
+  inputs: AudioDevice[];
+  systemCapture: "native" | "virtual" | "unavailable";
+  note: string;
+  backend: string;
+}
+
+export interface RecordingStatus {
+  active: boolean;
+  elapsedSecs: number;
+  micLevel: number;
+  sysLevel: number;
+  path: string | null;
+  error: string | null;
+}
+
+export interface RecordingResult {
+  path: string;
+  durationSecs: number;
+}
+
 export const api = {
+  listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
+  startRecording: () => invoke<string>("start_recording"),
+  stopRecording: () => invoke<RecordingResult>("stop_recording"),
+  recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   systemInfo: () => invoke<SystemInfo>("system_info"),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),

@@ -4,6 +4,7 @@
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
+  import MetaForm from "./MetaForm.svelte";
 
   let { job }: { job: Job } = $props();
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
@@ -73,27 +74,8 @@
       <span class="chev" class:up={showMeta}><Icon name="chevron" size={14} /></span>
     </button>
     {#if showMeta}
-      <div class="meta-form">
-        <div class="field">
-          <label for="m-date">Fecha</label>
-          <input id="m-date" class="input" placeholder="p. ej. 18 de septiembre de 2026, 10:00" bind:value={job.meta.date} />
-        </div>
-        <div class="field">
-          <label for="m-place">Lugar</label>
-          <input id="m-place" class="input" placeholder="p. ej. Sala de juntas / videollamada" bind:value={job.meta.place} />
-        </div>
-        <div class="field wide">
-          <label for="m-people">Participantes</label>
-          <textarea id="m-people" class="input short" placeholder="Un nombre por línea, con cargo o rol si aplica" bind:value={job.meta.participants}></textarea>
-        </div>
-        <div class="field wide">
-          <label for="m-notes">Notas adicionales</label>
-          <textarea id="m-notes" class="input short" placeholder="Contexto útil para la minuta: asunto, cliente, expediente, acuerdos previos…" bind:value={job.meta.notes}></textarea>
-        </div>
-        <p class="hint wide">
-          Se envían junto con la transcripción al generar el resumen y la minuta.
-          {#if docsDone}Ya se generaron documentos: usa «volver a generar» en su pestaña para aplicar estos cambios.{/if}
-        </p>
+      <div class="meta-body">
+        <MetaForm bind:meta={job.meta} hint={"Se envían junto con la transcripción al generar el resumen y la minuta." + (docsDone ? " Ya se generaron documentos: usa «volver a generar» en su pestaña para aplicar estos cambios." : "")} />
       </div>
     {/if}
   </div>
@@ -174,9 +156,7 @@
   .meta-toggle .hint { font-weight: 400; }
   .chev { margin-left: auto; display: inline-flex; transition: transform 0.15s; }
   .chev.up { transform: rotate(180deg); }
-  .meta-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding: 4px 18px 14px; }
-  .meta-form .wide { grid-column: 1 / -1; }
-  .meta-form textarea.short { min-height: 56px; }
+  .meta-body { padding: 4px 18px 14px; }
   .tabs { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); }
   .tabs > button:not(.btn) { display: inline-flex; align-items: center; gap: 6px; padding: 10px 10px; color: var(--muted); font-weight: 550; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tabs > button:not(.btn):hover:not(:disabled) { color: var(--text); }
