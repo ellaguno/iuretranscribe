@@ -418,7 +418,7 @@ fn spawn_source(
     let handle = std::thread::spawn(move || {
         let mut rs = crate::audio::StreamResampler::new(rate, TARGET_RATE);
         let err_tx = tx.clone();
-        let err_cb = move |e: cpal::StreamError| {
+        let err_cb = move |e: cpal::Error| {
             let _ = err_tx.send(Msg::Error(idx, e.to_string()));
         };
         macro_rules! build {
