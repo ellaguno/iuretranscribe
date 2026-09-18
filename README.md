@@ -72,6 +72,7 @@ En Linux, la primera vez importa `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` de
 `.github/workflows/build.yml` compila en cada push y, al crear una etiqueta
 `vX.Y.Z`, publica un borrador de release con instaladores para Linux (CPU y
 CUDA), Windows (CPU y CUDA) y macOS (Apple Silicon con Metal e Intel).
+Los artefactos de cada push (sin etiqueta) quedan en la pestaña Actions del repositorio.
 
 ## Licencia
 

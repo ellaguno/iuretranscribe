@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write
 
+env:
+  CUDA_VERSION: "12.8.1"
+
 jobs:
   build:
     strategy:
@@ -29,7 +32,7 @@ jobs:
             features: ""
             args: ""
           - name: windows-x64-cuda
-            os: windows-latest
+            os: windows-2022
             features: "cuda"
             args: ""
           - name: macos-arm64
@@ -37,7 +40,7 @@ jobs:
             features: "metal"
             args: "--target aarch64-apple-darwin"
           - name: macos-x64
-            os: macos-13
+            os: macos-15-intel
             features: ""
             args: "--target x86_64-apple-darwin"
     runs-on: ${{ matrix.os }}
@@ -64,14 +67,34 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf build-essential cmake libclang-dev libssl-dev
 
-      - name: CUDA toolkit
-        if: matrix.features == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.19
+      # --- CUDA (Linux): sólo los paquetes necesarios del repositorio de NVIDIA.
+      - name: CUDA toolkit (Linux)
+        if: matrix.features == 'cuda' && startsWith(matrix.os, 'ubuntu')
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
-          cuda: "12.6.0"
+          cuda: ${{ env.CUDA_VERSION }}
           method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas-dev"]'
-          non-cuda-sub-packages: '[]'
+          sub-packages: '["nvcc", "cudart-dev", "driver-dev"]'
+          non-cuda-sub-packages: '["libcublas-dev"]'
+          use-github-cache: false
+
+      # --- CUDA (Windows): nvcc + cuBLAS; se compila con Ninja + MSVC para no
+      # depender de la integración de CUDA con Visual Studio.
+      - name: CUDA toolkit (Windows)
+        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev"]'
+          use-github-cache: false
+      - name: Entorno MSVC
+        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Usar Ninja para whisper.cpp (Windows + CUDA)
+        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+        shell: bash
+        run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
 
       - run: npm ci
 
@@ -79,13 +102,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_FEATURES: ${{ matrix.features }}
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('IureTranscribe {0}', github.ref_name) || '' }}
-          releaseBody: "Instaladores generados automáticamente. Las variantes *cuda* requieren una GPU NVIDIA con drivers recientes."
+          releaseBody: "Instaladores generados automáticamente. Las variantes *cuda* requieren una GPU NVIDIA con drivers recientes; las demás funcionan en cualquier equipo (CPU, o Metal en Mac con Apple Silicon)."
           releaseDraft: true
           prerelease: false
 
