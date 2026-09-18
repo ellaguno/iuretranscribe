@@ -1,6 +1,16 @@
 <script lang="ts">
-  import { app, selectedModel, type View } from "../lib/state.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { app, selectedModel, toast, type View } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
+
+  const links = [
+    { label: "Sitio web", url: "https://iurefficient.com", icon: "globe" },
+    { label: "Demo", url: "https://demo.iurefficient.com", icon: "demo" },
+    { label: "YouTube", url: "https://youtube.com/@iurefficient", icon: "youtube" },
+  ];
+  function go(url: string) {
+    openUrl(url).catch((e) => toast(`No se pudo abrir ${url}: ${e}`, "error"));
+  }
 
   const items: { id: View; label: string; icon: string }[] = [
     { id: "transcribe", label: "Transcribir", icon: "waveform" },
@@ -32,6 +42,17 @@
     {/each}
   </nav>
 
+  <div class="links">
+    <div class="links-title">Iurefficient</div>
+    {#each links as l}
+      <button onclick={() => go(l.url)} title={l.url}>
+        <Icon name={l.icon} size={15} />
+        <span>{l.label}</span>
+        <Icon name="external" size={12} />
+      </button>
+    {/each}
+  </div>
+
   <div class="foot">
     <div class="row">
       <Icon name="cpu" size={15} />
@@ -62,7 +83,12 @@
   nav button:hover { background: var(--surface-2); }
   nav button.active { background: var(--accent-soft); color: var(--accent); }
   .badge { margin-left: auto; font-size: 11px; background: var(--accent); color: var(--accent-text); border-radius: 999px; padding: 1px 7px; }
-  .foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+  .links { margin-top: auto; display: flex; flex-direction: column; gap: 1px; padding: 6px 0; }
+  .links-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }
+  .links button { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; color: var(--text-2); font-size: 13px; text-align: left; }
+  .links button :global(svg:last-child) { margin-left: auto; opacity: 0.5; }
+  .links button:hover { background: var(--surface-2); color: var(--accent); }
+  .foot { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
   .row { display: flex; align-items: center; gap: 7px; overflow: hidden; }
   .row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .warn { color: var(--warn); }
