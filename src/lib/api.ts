@@ -116,6 +116,10 @@ export const api = {
   cancelJob: (jobId: string) => invoke<boolean>("cancel_job", { jobId }),
   generateDocument: (kind: DocKind, text: string, outputDir: string, baseName: string) =>
     invoke<DocumentResult>("generate_document", { request: { kind, text, outputDir, baseName } }),
+  loadJobs: () => invoke<string>("load_jobs"),
+  saveJobs: (json: string) => invoke<void>("save_jobs", { json }),
+  loadDocuments: (outputDir: string, baseName: string) =>
+    invoke<{ summary: DocumentResult | null; minutes: DocumentResult | null }>("load_documents", { outputDir, baseName }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),

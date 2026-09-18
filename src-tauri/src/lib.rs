@@ -19,6 +19,7 @@ use transcribe::Engine;
 
 pub struct AppState {
     settings_path: PathBuf,
+    jobs_path: PathBuf,
     models_dir: PathBuf,
     settings: Mutex<Settings>,
     downloads: Arc<Downloads>,
@@ -297,6 +298,39 @@ async fn generate_document(state: State<'_, AppState>, request: DocumentRequest)
     Ok(DocumentResult { kind: request.kind, content, path: path.to_string_lossy().into_owned() })
 }
 
+/// Lista de trabajos serializada por el frontend (se restaura al reiniciar).
+#[tauri::command]
+fn load_jobs(state: State<'_, AppState>) -> String {
+    std::fs::read_to_string(&state.jobs_path).unwrap_or_else(|_| "[]".into())
+}
+
+#[tauri::command]
+fn save_jobs(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    let tmp = state.jobs_path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &state.jobs_path).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentsOnDisk {
+    summary: Option<DocumentResult>,
+    minutes: Option<DocumentResult>,
+}
+
+/// Recupera resumen y minuta ya generados junto a la transcripción, si existen.
+#[tauri::command]
+fn load_documents(output_dir: String, base_name: String) -> DocumentsOnDisk {
+    let read = |suffix: &str, kind: &str| {
+        let path = PathBuf::from(&output_dir).join(format!("{base_name}{suffix}"));
+        std::fs::read_to_string(&path)
+            .ok()
+            .filter(|c| !c.trim().is_empty())
+            .map(|content| DocumentResult { kind: kind.into(), content, path: path.to_string_lossy().into_owned() })
+    };
+    DocumentsOnDisk { summary: read("_resumen.md", "summary"), minutes: read("_minuta.md", "minutes") }
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -329,6 +363,7 @@ pub fn run() {
             let settings = Settings::load(&settings_path);
             app.manage(AppState {
                 settings_path,
+                jobs_path: data_dir.join("jobs.json"),
                 models_dir,
                 settings: Mutex::new(settings),
                 downloads: Arc::new(Downloads::default()),
@@ -350,6 +385,9 @@ pub fn run() {
             transcribe_file,
             cancel_job,
             generate_document,
+            load_jobs,
+            save_jobs,
+            load_documents,
             open_path,
             reveal_path,
             read_text_file,

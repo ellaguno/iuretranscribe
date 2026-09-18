@@ -84,12 +84,81 @@ export function applyTheme() {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 
+/** Forma en que se guardan los trabajos en disco (sin segmentos en vivo). */
+type StoredJob = Omit<Job, "liveSegments">;
+
+function serializeJobs(): string {
+  const stored: StoredJob[] = app.jobs.map((j) => ({
+    id: j.id,
+    path: j.path,
+    name: j.name,
+    sizeBytes: j.sizeBytes,
+    durationSecs: j.durationSecs,
+    status: isActive(j) ? "queued" : j.status,
+    percent: isActive(j) ? 0 : j.percent,
+    error: j.error,
+    result: j.result,
+    summary: j.summary.status === "loading" ? { status: "idle" } : j.summary,
+    minutes: j.minutes.status === "loading" ? { status: "idle" } : j.minutes,
+    startedAt: j.startedAt,
+    finishedAt: j.finishedAt,
+  }));
+  return JSON.stringify(stored);
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+function startPersistence() {
+  $effect.root(() => {
+    $effect(() => {
+      const json = serializeJobs(); // lee sólo los campos persistidos → se re-ejecuta cuando cambian
+      clearTimeout(persistTimer);
+      persistTimer = setTimeout(() => api.saveJobs(json).catch((e) => console.error("saveJobs", e)), 400);
+    });
+  });
+}
+
+async function restoreJobs() {
+  let stored: StoredJob[] = [];
+  try {
+    stored = JSON.parse(await api.loadJobs());
+  } catch (e) {
+    console.error("loadJobs", e);
+    return;
+  }
+  if (!Array.isArray(stored) || !stored.length) return;
+  const jobs: Job[] = stored.map((j) => ({
+    ...j,
+    status: isActive(j as Job) ? "queued" : j.status,
+    liveSegments: [],
+    summary: j.summary ?? { status: "idle" },
+    minutes: j.minutes ?? { status: "idle" },
+  }));
+  // Recupera resumen/minuta que ya existan en disco (p. ej. tras un reinicio).
+  await Promise.all(
+    jobs
+      .filter((j) => j.result && (j.summary.status !== "done" || j.minutes.status !== "done"))
+      .map(async (j) => {
+        try {
+          const docs = await api.loadDocuments(j.result!.outputDir, j.result!.baseName);
+          if (docs.summary && j.summary.status !== "done") j.summary = { status: "done", content: docs.summary.content, path: docs.summary.path };
+          if (docs.minutes && j.minutes.status !== "done") j.minutes = { status: "done", content: docs.minutes.content, path: docs.minutes.path };
+        } catch { /* sin documentos */ }
+      }),
+  );
+  app.jobs = jobs;
+  app.selectedJobId = jobs.find((j) => j.status === "done")?.id ?? jobs[0]?.id ?? null;
+  const interrupted = stored.filter((j) => isActive(j as Job)).length;
+  if (interrupted) toast(`${interrupted} transcripción(es) se interrumpieron al cerrar la app y volvieron a la cola`, "info", 7000);
+}
+
 export async function init() {
   const [settings, sys, models] = await Promise.all([api.getSettings(), api.systemInfo(), api.listModels()]);
   app.settings = settings;
   app.sys = sys;
   app.models = models;
   applyTheme();
+  await restoreJobs();
+  startPersistence();
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
 
   await listen<ProgressEvent>("job-progress", (e) => {

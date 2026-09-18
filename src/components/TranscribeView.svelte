@@ -109,7 +109,7 @@
   .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
   .dz-icon { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 8px; }
   .dropzone.small { flex: none; margin: 4px 0 0; flex-direction: row; padding: 12px; font-size: 13px; font-weight: 550; border-radius: 12px; }
-  .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 18px; padding: 0 26px 26px; }
+  .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) 1fr; grid-template-rows: minmax(0, 1fr); gap: 18px; padding: 0 26px 26px; }
   .jobs { display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
   .detail { min-width: 0; display: flex; flex-direction: column; }
   .empty { display: grid; place-items: center; height: 100%; }
