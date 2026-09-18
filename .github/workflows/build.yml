@@ -40,7 +40,8 @@ jobs:
           - name: windows-x64-cuda
             os: windows-2022
             features: "cuda"
-            args: "--config src-tauri/tauri.cuda-windows.conf.json"
+            # Sólo NSIS: el .msi duplicaría los ~500 MB del runtime de CUDA.
+            args: "--bundles nsis --config src-tauri/tauri.cuda-windows.conf.json"
           - name: macos-arm64
             os: macos-latest
             features: "metal"
