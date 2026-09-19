@@ -115,7 +115,7 @@ jobs:
           non-cuda-sub-packages: '["libcublas-dev"]'
           use-github-cache: false
 
-      # Copia el runtime de CUDA para incluirlo en el .deb/.rpm (/usr/lib/iuretranscribe)
+      # Copia el runtime de CUDA para incluirlo en el .deb/.rpm (/usr/lib/IureTranscribe)
       # y hace que el binario lo busque ahí primero.
       - name: Runtime de CUDA como recurso (Linux)
         if: matrix.features == 'cuda' && startsWith(matrix.os, 'ubuntu')
@@ -123,7 +123,7 @@ jobs:
           mkdir -p src-tauri/cuda-libs
           cp -L /usr/local/cuda/lib64/libcudart.so.12 /usr/local/cuda/lib64/libcublas.so.12 /usr/local/cuda/lib64/libcublasLt.so.12 src-tauri/cuda-libs/
           ls -la src-tauri/cuda-libs
-          echo 'RUSTFLAGS=-C link-arg=-Wl,-rpath,$ORIGIN/../lib/iuretranscribe:/usr/local/cuda/lib64' >> "$GITHUB_ENV"
+          echo 'RUSTFLAGS=-C link-arg=-Wl,-rpath,$ORIGIN/../lib/IureTranscribe:/usr/local/cuda/lib64' >> "$GITHUB_ENV"
 
       # --- CUDA (Windows): nvcc + cuBLAS; se compila con Ninja + MSVC para no
       # depender de la integración de CUDA con Visual Studio.
