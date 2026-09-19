@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type DocKind } from "../lib/api";
-  import { app, generateDoc, isActive, metaFilled, retranscribe, toast, type Job } from "../lib/state.svelte";
+  import { app, generateDoc, isActive, metaFilled, metaFilledByUser, retranscribe, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -11,7 +11,7 @@
   let filled = $derived(metaFilled(job.meta));
   // Abierto por defecto mientras no se hayan capturado datos; plegado cuando ya hay.
   // svelte-ignore state_referenced_locally
-  let showMeta = $state(!metaFilled(job.meta));
+  let showMeta = $state(!metaFilledByUser(job.meta));
   let metaSummary = $derived(
     [job.meta.date, job.meta.place, job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")]
       .filter(Boolean)
@@ -30,7 +30,7 @@
   $effect(() => {
     if (job.id) {
       tab = "transcript";
-      showMeta = !metaFilled(job.meta);
+      showMeta = !metaFilledByUser(job.meta);
     }
   });
 

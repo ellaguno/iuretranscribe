@@ -33,8 +33,22 @@ export interface JobMeta {
   notes: string;
 }
 
+/** Fecha de hoy en español, p. ej. «19 de septiembre de 2026». */
+export function todayLabel(): string {
+  try {
+    return new Date().toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 export function emptyMeta(): JobMeta {
-  return { participants: "", date: "", place: "", notes: "" };
+  return { participants: "", date: todayLabel(), place: "", notes: "" };
+}
+
+/** ¿El usuario capturó algo más allá de la fecha sugerida? */
+export function metaFilledByUser(m: JobMeta): boolean {
+  return !!(m.place.trim() || m.participants.trim() || m.notes.trim() || (m.date.trim() && m.date.trim() !== todayLabel()));
 }
 
 export function metaToContext(m: JobMeta): string {
@@ -345,18 +359,27 @@ export async function stopRecording() {
   app.recordingBusy = true;
   stopPolling();
   try {
+    const recordingStartedAt = Date.now() - app.recording.elapsedSecs * 1000;
+    const wasLive = app.recording.live;
     const res = await api.stopRecording();
     app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
     const [job] = await addFiles([res.path]);
+    const live = app.liveSegments.map((s) => ({ ...s }));
+    app.liveSegments = [];
     if (job) {
       job.meta = { ...app.pendingMeta };
-      job.liveSegments = app.liveSegments.map((s) => ({ ...s }));
+      job.liveSegments = live;
       app.selectedJobId = job.id;
     }
-    app.liveSegments = [];
     app.pendingMeta = emptyMeta();
     toast(`Grabación guardada (${Math.round(res.durationSecs)} s)`, "success");
-    if (app.settings?.autoTranscribeRecording) await startQueue();
+    const s = app.settings;
+    if (job && wasLive && live.length && s?.liveIsFinal) {
+      // La transcripción en vivo es el resultado final: se escriben las salidas sin repetir.
+      await finalizeFromLive(job, live, res.durationSecs, (Date.now() - recordingStartedAt) / 1000);
+    } else if (s?.autoTranscribeRecording) {
+      await startQueue();
+    }
   } catch (e) {
     app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
     toast(String(e), "error", 9000);
