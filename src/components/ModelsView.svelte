@@ -35,6 +35,7 @@
         <div class="mtitle">
           <h3>{m.name}</h3>
           {#if m.recommended}<span class="pill accent">Recomendado</span>{/if}
+          {#if m.bundled}<span class="pill">Incluido</span>{/if}
           {#if current}<span class="pill success"><Icon name="check" size={11} stroke={3} /> En uso</span>{/if}
         </div>
         <span class="size">{fmtMb(m.sizeMb)}</span>
@@ -53,7 +54,9 @@
           {#if !current}
             <button class="btn sm primary" onclick={() => use(m.id)}>Usar este modelo</button>
           {/if}
-          <button class="btn sm ghost danger" title="Eliminar del disco" onclick={() => deleteModel(m.id)} disabled={app.running}><Icon name="trash" size={14} /></button>
+          {#if !m.bundled}
+            <button class="btn sm ghost danger" title="Eliminar del disco" onclick={() => deleteModel(m.id)} disabled={app.running}><Icon name="trash" size={14} /></button>
+          {/if}
         {:else}
           <button class="btn sm primary" onclick={() => downloadModel(m.id)}><Icon name="download" size={14} /> Descargar</button>
         {/if}

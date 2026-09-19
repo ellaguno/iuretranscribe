@@ -5,8 +5,9 @@ localmente con **Whisper** y, opcionalmente, generar **resumen** y **minuta**
 con un modelo de lenguaje vía OpenRouter. Reemplaza al script `transcribe` de
 línea de comandos con una interfaz gráfica.
 
-- Transcripción 100 % local con [whisper.cpp](https://github.com/ggerganov/whisper.cpp)
-  (modelos GGML, se descargan desde la propia app).
+- Transcripción 100 % local con [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+  El instalador incluye el modelo Base para funcionar de inmediato; los demás
+  modelos GGML (Large v3 Turbo recomendado) se descargan desde la propia app.
 - Cola de archivos con arrastrar y soltar, progreso en vivo y segmentos en tiempo real.
 - Salida en SRT, VTT, TXT y JSON, junto al archivo original o en una carpeta fija.
 - Resumen y minuta en Markdown (OpenRouter, con instrucciones editables), con

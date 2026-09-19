@@ -44,12 +44,14 @@ pub struct Settings {
     pub live_transcription: bool,
     /// Segundos por bloque de la transcripción en vivo.
     pub live_chunk_secs: f64,
+    /// Al detener, usar la transcripción en vivo como resultado final (sin repetir).
+    pub live_is_final: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            model_id: "large-v3-turbo".into(),
+            model_id: "base".into(),
             language: "es".into(),
             translate: false,
             formats: vec!["srt".into(), "txt".into()],
@@ -72,6 +74,7 @@ impl Default for Settings {
             auto_transcribe_recording: true,
             live_transcription: true,
             live_chunk_secs: 8.0,
+            live_is_final: true,
         }
     }
 }

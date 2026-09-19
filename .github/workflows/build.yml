@@ -160,6 +160,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Modelo Base incluido en el instalador
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/models
+          curl -sSL --retry 3 -o src-tauri/resources/models/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+          ls -la src-tauri/resources/models
+
       - name: Compilar y empaquetar
         uses: tauri-apps/tauri-action@v0
         env:

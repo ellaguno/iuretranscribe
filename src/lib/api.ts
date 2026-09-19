@@ -24,6 +24,7 @@ export interface Settings {
   autoTranscribeRecording: boolean;
   liveTranscription: boolean;
   liveChunkSecs: number;
+  liveIsFinal: boolean;
 }
 
 export interface ModelInfo {
@@ -36,6 +37,7 @@ export interface ModelInfo {
   recommended: boolean;
   downloaded: boolean;
   downloading: boolean;
+  bundled: boolean;
   path: string;
 }
 
@@ -160,6 +162,8 @@ export const api = {
   probeFiles: (paths: string[]) => invoke<FileProbe[]>("probe_files", { paths }),
   transcribeFile: (jobId: string, path: string) =>
     invoke<TranscriptResult>("transcribe_file", { request: { jobId, path } }),
+  saveLiveTranscript: (jobId: string, path: string, segments: Segment[], audioSecs: number, elapsedSecs: number) =>
+    invoke<TranscriptResult>("save_live_transcript", { request: { jobId, path, segments, audioSecs, elapsedSecs } }),
   cancelJob: (jobId: string) => invoke<boolean>("cancel_job", { jobId }),
   generateDocument: (kind: DocKind, text: string, outputDir: string, baseName: string, context: string) =>
     invoke<DocumentResult>("generate_document", { request: { kind, text, outputDir, baseName, context } }),

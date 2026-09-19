@@ -102,7 +102,7 @@
         <h2><Icon name="settings" size={16} /> Fuentes</h2>
         {#if !openSources}
           <span class="summary hint">
-            {[s.recordMic ? "micrófono" : "", s.recordSystem && !sysUnavailable ? "sistema" : ""].filter(Boolean).join(" + ") || "sin fuentes"}{s.liveTranscription ? " · en vivo" : ""}{s.autoTranscribeRecording ? " · transcribe al detener" : ""}
+            {[s.recordMic ? "micrófono" : "", s.recordSystem && !sysUnavailable ? "sistema" : ""].filter(Boolean).join(" + ") || "sin fuentes"}{s.liveTranscription ? (s.liveIsFinal ? " · en vivo (final)" : " · en vivo (vista previa)") : ""}{(!s.liveTranscription || !s.liveIsFinal) && s.autoTranscribeRecording ? " · transcribe al detener" : ""}
           </span>
         {/if}
         <span class="chev" class:up={openSources}><Icon name="chevron" size={14} /></span>
@@ -146,13 +146,24 @@
         </div>
         <button class="switch" class:on={s.liveTranscription} aria-label="Transcribir en vivo" disabled={rec.active} onclick={() => saveSettings({ liveTranscription: !s.liveTranscription })}></button>
       </div>
-      <div class="switchrow">
-        <div>
-          <span class="label">Transcribir automáticamente al detener</span>
-          <p class="hint">Al detener, la grabación completa se transcribe con calidad alta (la versión en vivo es una vista previa).</p>
+      {#if s.liveTranscription}
+        <div class="switchrow">
+          <div>
+            <span class="label">Usar la transcripción en vivo como resultado final</span>
+            <p class="hint">Al detener se generan los archivos, el resumen y la minuta con lo ya transcrito, sin repetir el trabajo. Siempre podrás pedir una segunda pasada con calidad alta desde el panel del archivo.</p>
+          </div>
+          <button class="switch" class:on={s.liveIsFinal} aria-label="Usar en vivo como final" disabled={rec.active} onclick={() => saveSettings({ liveIsFinal: !s.liveIsFinal })}></button>
         </div>
-        <button class="switch" class:on={s.autoTranscribeRecording} aria-label="Transcribir automáticamente" onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
-      </div>
+      {/if}
+      {#if !s.liveTranscription || !s.liveIsFinal}
+        <div class="switchrow">
+          <div>
+            <span class="label">Transcribir la grabación completa al detener</span>
+            <p class="hint">Se agrega a la cola y se procesa con el modelo seleccionado y calidad alta.</p>
+          </div>
+          <button class="switch" class:on={s.autoTranscribeRecording} aria-label="Transcribir automáticamente" onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
+        </div>
+      {/if}
       <div class="dir">
         <span class="label">Carpeta de grabaciones</span>
         <div class="row">

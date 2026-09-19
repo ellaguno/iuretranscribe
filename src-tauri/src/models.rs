@@ -24,6 +24,8 @@ pub struct ModelInfo {
     pub recommended: bool,
     pub downloaded: bool,
     pub downloading: bool,
+    /// Viene incluido en el instalador (no se puede borrar).
+    pub bundled: bool,
     pub path: String,
 }
 
@@ -54,7 +56,7 @@ const CATALOG: &[CatalogEntry] = &[
     CatalogEntry { id: "small", name: "Small", size_mb: 488, quality: "media", recommended: false,
         description: "Rápido y ligero. Calidad aceptable para audio claro." },
     CatalogEntry { id: "base", name: "Base", size_mb: 148, quality: "baja", recommended: false,
-        description: "Muy rápido; útil para pruebas o borradores." },
+        description: "Incluido en el instalador: funciona de inmediato sin descargar nada. Muy rápido; calidad básica, ideal para borradores." },
     CatalogEntry { id: "tiny", name: "Tiny", size_mb: 78, quality: "baja", recommended: false,
         description: "El más pequeño. Sólo para pruebas rápidas." },
 ];
@@ -73,6 +75,20 @@ pub fn model_path(models_dir: &Path, id: &str) -> PathBuf {
 
 pub fn is_known(id: &str) -> bool {
     CATALOG.iter().any(|e| e.id == id)
+}
+
+fn file_ok(p: &Path) -> bool {
+    std::fs::metadata(p).map(|m| m.len() > 1_000_000).unwrap_or(false)
+}
+
+/// Ruta utilizable del modelo: la descargada o, si no existe, la incluida en el instalador.
+pub fn resolve(models_dir: &Path, bundled_dir: Option<&Path>, id: &str) -> Option<PathBuf> {
+    let downloaded = model_path(models_dir, id);
+    if file_ok(&downloaded) {
+        return Some(downloaded);
+    }
+    let bundled = bundled_dir?.join(file_name(id));
+    file_ok(&bundled).then_some(bundled)
 }
 
 #[derive(Default)]
@@ -107,12 +123,13 @@ impl Downloads {
     }
 }
 
-pub fn list(models_dir: &Path, downloads: &Downloads) -> Vec<ModelInfo> {
+pub fn list(models_dir: &Path, bundled_dir: Option<&Path>, downloads: &Downloads) -> Vec<ModelInfo> {
     CATALOG
         .iter()
         .map(|e| {
-            let path = model_path(models_dir, e.id);
-            let downloaded = std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false);
+            let bundled = bundled_dir.map(|d| file_ok(&d.join(file_name(e.id)))).unwrap_or(false);
+            let path = resolve(models_dir, bundled_dir, e.id).unwrap_or_else(|| model_path(models_dir, e.id));
+            let downloaded = file_ok(&path);
             ModelInfo {
                 id: e.id.into(),
                 name: e.name.into(),
@@ -123,6 +140,7 @@ pub fn list(models_dir: &Path, downloads: &Downloads) -> Vec<ModelInfo> {
                 recommended: e.recommended,
                 downloaded,
                 downloading: downloads.is_active(e.id),
+                bundled,
                 path: path.to_string_lossy().into_owned(),
             }
         })

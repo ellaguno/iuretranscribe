@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type DocKind } from "../lib/api";
-  import { app, generateDoc, isActive, metaFilled, toast, type Job } from "../lib/state.svelte";
+  import { app, generateDoc, isActive, metaFilled, retranscribe, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -8,8 +8,15 @@
 
   let { job }: { job: Job } = $props();
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
-  let showMeta = $state(false);
   let filled = $derived(metaFilled(job.meta));
+  // Abierto por defecto mientras no se hayan capturado datos; plegado cuando ya hay.
+  // svelte-ignore state_referenced_locally
+  let showMeta = $state(!metaFilled(job.meta));
+  let metaSummary = $derived(
+    [job.meta.date, job.meta.place, job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")]
+      .filter(Boolean)
+      .join(" · "),
+  );
   let docsDone = $derived(job.summary.status === "done" || job.minutes.status === "done");
   let listEl = $state<HTMLDivElement | null>(null);
 
@@ -21,7 +28,10 @@
     if (isActive(job) && listEl && segments.length) listEl.scrollTop = listEl.scrollHeight;
   });
   $effect(() => {
-    if (job.id) tab = "transcript";
+    if (job.id) {
+      tab = "transcript";
+      showMeta = !metaFilled(job.meta);
+    }
   });
 
   async function copyText() {
@@ -62,6 +72,7 @@
           <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
         {/each}
         <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
+        <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
       </div>
     {/if}
   </div>
@@ -70,7 +81,7 @@
     <button class="meta-toggle" onclick={() => (showMeta = !showMeta)} aria-expanded={showMeta}>
       <Icon name="doc" size={15} />
       <span>Detalles de la reunión</span>
-      {#if filled}<span class="pill accent">Capturados</span>{:else}<span class="hint">participantes, fecha y lugar para la minuta</span>{/if}
+      {#if filled}<span class="summary hint" title={metaSummary}>{metaSummary}</span>{:else}<span class="hint">participantes, fecha y lugar para el resumen y la minuta</span>{/if}
       <span class="chev" class:up={showMeta}><Icon name="chevron" size={14} /></span>
     </button>
     {#if showMeta}
@@ -115,7 +126,7 @@
     <div class="body scroll">
       {#if doc.status === "done" && doc.content}
         <div class="docbar">
-          <span class="hint" title={doc.path}>Guardado en {doc.path}</span>
+          <span class="hint" title={doc.path}>Guardado en {doc.path}{filled ? " · con detalles de la reunión" : ""}</span>
           <button class="btn sm ghost" onclick={() => copyDoc(kind)}><Icon name="copy" size={14} /> Copiar</button>
           <button class="btn sm ghost" onclick={() => openFile(doc.path!)}><Icon name="external" size={14} /> Abrir</button>
           <button class="btn sm ghost" onclick={() => generateDoc(job, kind)} title="Volver a generar"><Icon name="refresh" size={14} /></button>
@@ -131,6 +142,11 @@
               <Icon name="sparkles" size={16} /> Generar {kind === "summary" ? "resumen" : "minuta"}
             </button>
             <p class="hint">Se enviará la transcripción a OpenRouter ({app.settings?.openrouterModel}).</p>
+            {#if filled}
+              <p class="hint ok"><Icon name="check" size={13} /> Se incluirán los detalles de la reunión: {metaSummary}</p>
+            {:else}
+              <p class="hint"><Icon name="info" size={13} /> Sin detalles de la reunión. <button class="link" onclick={() => (showMeta = true)}>Captura participantes, fecha y lugar</button> para una minuta más completa.</p>
+            {/if}
           {:else}
             <p class="hint">Configura tu llave de OpenRouter en Ajustes para generar resúmenes y minutas.</p>
             <button class="btn" onclick={() => (app.view = "settings")}><Icon name="settings" size={15} /> Ir a Ajustes</button>
@@ -157,6 +173,9 @@
   .chev { margin-left: auto; display: inline-flex; transition: transform 0.15s; }
   .chev.up { transform: rotate(180deg); }
   .meta-body { padding: 4px 18px 14px; }
+  .meta-toggle .summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
+  .hint.ok { color: var(--success); display: inline-flex; align-items: center; gap: 5px; }
+  .link { color: var(--accent); text-decoration: underline; font-weight: 550; }
   .tabs { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-bottom: 1px solid var(--border); }
   .tabs > button:not(.btn) { display: inline-flex; align-items: center; gap: 6px; padding: 10px 10px; color: var(--muted); font-weight: 550; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tabs > button:not(.btn):hover:not(:disabled) { color: var(--text); }

@@ -456,6 +456,32 @@ async function runJob(job: Job) {
   }
 }
 
+async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number, elapsedSecs: number) {
+  job.status = "decoding";
+  try {
+    const result = await api.saveLiveTranscript(job.id, job.path, segments, audioSecs, elapsedSecs);
+    job.result = result;
+    job.durationSecs = result.audioSecs;
+    job.status = "done";
+    job.percent = 100;
+    job.startedAt = Date.now() - elapsedSecs * 1000;
+    job.finishedAt = Date.now();
+    const s = app.settings;
+    if (s?.autoSummary) await generateDoc(job, "summary");
+    if (s?.autoMinutes) await generateDoc(job, "minutes");
+  } catch (e) {
+    job.status = "queued";
+    toast(`No se pudo guardar la transcripción en vivo: ${e}. Se transcribirá de nuevo.`, "error", 8000);
+    await startQueue();
+  }
+}
+
+/** Vuelve a transcribir un archivo ya terminado con el proceso completo (calidad alta). */
+export async function retranscribe(id: string) {
+  retryJob(id);
+  await startQueue();
+}
+
 export async function generateDoc(job: Job, kind: DocKind) {
   if (!job.result) return;
   const slot = kind === "summary" ? job.summary : job.minutes;

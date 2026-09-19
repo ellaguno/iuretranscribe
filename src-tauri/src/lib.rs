@@ -23,6 +23,8 @@ pub struct AppState {
     settings_path: PathBuf,
     jobs_path: PathBuf,
     models_dir: PathBuf,
+    /// Carpeta de modelos incluidos en el instalador (recursos), si existe.
+    bundled_models_dir: Option<PathBuf>,
     recordings_default: PathBuf,
     recorder: Arc<Recorder>,
     settings: Mutex<Settings>,
@@ -143,7 +145,7 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), S
 
 #[tauri::command]
 fn list_models(state: State<'_, AppState>) -> Vec<ModelInfo> {
-    models::list(&state.models_dir, &state.downloads)
+    models::list(&state.models_dir, state.bundled_models_dir.as_deref(), &state.downloads)
 }
 
 #[tauri::command]
@@ -159,7 +161,13 @@ fn cancel_download(state: State<'_, AppState>, id: String) -> bool {
 #[tauri::command]
 fn delete_model(state: State<'_, AppState>, id: String) -> Result<(), String> {
     state.engine.unload();
-    models::delete(&state.models_dir, &id)
+    models::delete(&state.models_dir, &id)?;
+    if let Some(b) = state.bundled_models_dir.as_deref() {
+        if b.join(models::file_name(&id)).is_file() {
+            return Err("Ese modelo viene incluido en el instalador; se eliminó la copia descargada pero seguirá disponible.".into());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -209,10 +217,9 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
     if !models::is_known(&settings.model_id) {
         return Err(format!("Modelo desconocido: {}", settings.model_id));
     }
-    let model_path = models::model_path(&state.models_dir, &settings.model_id);
-    if !model_path.is_file() {
+    let Some(model_path) = models::resolve(&state.models_dir, state.bundled_models_dir.as_deref(), &settings.model_id) else {
         return Err(format!("El modelo «{}» no está descargado. Descárgalo en la sección Modelos.", settings.model_id));
-    }
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     state.jobs.lock().unwrap().insert(request.job_id.clone(), cancel.clone());
 
@@ -244,26 +251,7 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
     let out = result.map_err(|e| format!("{e:#}"))?;
     let elapsed_secs = started.elapsed().as_secs_f64();
 
-    let output_dir = resolve_output_dir(&settings, &input);
-    std::fs::create_dir_all(&output_dir).map_err(|e| format!("No se pudo crear la carpeta de salida: {e}"))?;
-    let base_name = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "transcripcion".into());
-    let mut outputs = Vec::new();
-    let mut formats = settings.formats.clone();
-    if formats.is_empty() {
-        formats.push("srt".into());
-    }
-    for fmt in formats {
-        let (ext, content) = match fmt.as_str() {
-            "srt" => ("srt", subtitles::to_srt(&out.segments)),
-            "vtt" => ("vtt", subtitles::to_vtt(&out.segments)),
-            "txt" => ("txt", subtitles::to_txt(&out.segments)),
-            "json" => ("json", subtitles::to_json(&out.segments)),
-            _ => continue,
-        };
-        let path = output_dir.join(format!("{base_name}.{ext}"));
-        std::fs::write(&path, content).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
-        outputs.push(OutputFile { format: fmt, path: path.to_string_lossy().into_owned() });
-    }
+    let (outputs, output_dir, base_name) = write_outputs(&settings, &input, &out.segments)?;
 
     Ok(TranscriptResult {
         job_id,
@@ -275,6 +263,64 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
         output_dir: output_dir.to_string_lossy().into_owned(),
         base_name,
         detected_language: out.detected_language,
+    })
+}
+
+/// Escribe los formatos de salida configurados junto al archivo (o en la carpeta fija).
+fn write_outputs(settings: &Settings, input: &Path, segments: &[Segment]) -> Result<(Vec<OutputFile>, PathBuf, String), String> {
+    let output_dir = resolve_output_dir(settings, input);
+    std::fs::create_dir_all(&output_dir).map_err(|e| format!("No se pudo crear la carpeta de salida: {e}"))?;
+    let base_name = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "transcripcion".into());
+    let mut outputs = Vec::new();
+    let mut formats = settings.formats.clone();
+    if formats.is_empty() {
+        formats.push("srt".into());
+    }
+    for fmt in formats {
+        let (ext, content) = match fmt.as_str() {
+            "srt" => ("srt", subtitles::to_srt(segments)),
+            "vtt" => ("vtt", subtitles::to_vtt(segments)),
+            "txt" => ("txt", subtitles::to_txt(segments)),
+            "json" => ("json", subtitles::to_json(segments)),
+            _ => continue,
+        };
+        let path = output_dir.join(format!("{base_name}.{ext}"));
+        std::fs::write(&path, content).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
+        outputs.push(OutputFile { format: fmt, path: path.to_string_lossy().into_owned() });
+    }
+    Ok((outputs, output_dir, base_name))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveTranscriptRequest {
+    job_id: String,
+    path: String,
+    segments: Vec<Segment>,
+    audio_secs: f64,
+    elapsed_secs: f64,
+}
+
+/// Convierte la transcripción en vivo de una grabación en el resultado final
+/// (escribe SRT/TXT/… sin volver a transcribir).
+#[tauri::command]
+fn save_live_transcript(state: State<'_, AppState>, request: LiveTranscriptRequest) -> Result<TranscriptResult, String> {
+    let settings = state.settings.lock().unwrap().clone();
+    let input = PathBuf::from(&request.path);
+    if request.segments.is_empty() {
+        return Err("La transcripción en vivo está vacía.".into());
+    }
+    let (outputs, output_dir, base_name) = write_outputs(&settings, &input, &request.segments)?;
+    Ok(TranscriptResult {
+        job_id: request.job_id,
+        text: subtitles::to_plain(&request.segments),
+        segments: request.segments,
+        audio_secs: request.audio_secs,
+        elapsed_secs: request.elapsed_secs,
+        outputs,
+        output_dir: output_dir.to_string_lossy().into_owned(),
+        base_name,
+        detected_language: None,
     })
 }
 
@@ -372,8 +418,7 @@ async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<S
     let settings = state.settings.lock().unwrap().clone();
     let mut live_note = None;
     let live = if settings.live_transcription {
-        let model_path = models::model_path(&state.models_dir, &settings.model_id);
-        if model_path.is_file() {
+        if let Some(model_path) = models::resolve(&state.models_dir, state.bundled_models_dir.as_deref(), &settings.model_id) {
             let app = app.clone();
             Some(recorder::LiveOptions {
                 engine: state.engine.clone(),
@@ -458,11 +503,13 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let models_dir = data_dir.join("models");
             std::fs::create_dir_all(&models_dir)?;
+            let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
             let settings = Settings::load(&settings_path);
             app.manage(AppState {
                 settings_path,
                 jobs_path: data_dir.join("jobs.json"),
+                bundled_models_dir,
                 recordings_default: dirs::audio_dir().unwrap_or_else(|| data_dir.clone()).join("IureTranscribe"),
                 recorder: Arc::new(Recorder::default()),
                 models_dir,
@@ -484,6 +531,7 @@ pub fn run() {
             unload_model,
             probe_files,
             transcribe_file,
+            save_live_transcript,
             cancel_job,
             generate_document,
             load_jobs,
