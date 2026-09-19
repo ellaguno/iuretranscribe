@@ -168,8 +168,10 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           mkdir -p dist-release
-          shopt -s nullglob globstar
-          for f in src-tauri/target/**/release/bundle/{deb,rpm,appimage,msi,nsis,dmg}/*.{deb,rpm,AppImage,msi,exe,dmg}; do
+          # bash 3.2 de macOS no tiene globstar: se usa find.
+          find src-tauri/target -path '*/release/bundle/*' -type f \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \) \
+            -print | while read -r f; do
             ext="${f##*.}"
             cp "$f" "dist-release/IureTranscribe_${VERSION}_${{ matrix.name }}.${ext}"
           done
