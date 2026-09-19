@@ -86,7 +86,13 @@ jobs:
       # --- Vulkan (AMD / Intel / NVIDIA sin CUDA): sólo hace falta el SDK para compilar los shaders.
       - name: Vulkan SDK (Linux)
         if: matrix.features == 'vulkan' && startsWith(matrix.os, 'ubuntu')
-        run: sudo apt-get install -y libvulkan-dev glslc
+        # Ubuntu 22.04 no trae glslc: se usa el repositorio de LunarG.
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+          glslc --version
       - name: Vulkan SDK (Windows)
         if: matrix.features == 'vulkan' && startsWith(matrix.os, 'windows')
         shell: pwsh
