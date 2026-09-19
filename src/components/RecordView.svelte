@@ -19,6 +19,22 @@
     if (liveEl && app.liveSegments.length) liveEl.scrollTop = liveEl.scrollHeight;
   });
 
+  // Paneles plegables: se pliegan solos al iniciar la grabación y se abren al detenerla.
+  let openSources = $state(true);
+  let openMeta = $state(true);
+  let wasActive = false;
+  $effect(() => {
+    const active = rec.active;
+    if (active && !wasActive) {
+      openSources = false;
+      openMeta = false;
+    } else if (!active && wasActive) {
+      openSources = true;
+      openMeta = true;
+    }
+    wasActive = active;
+  });
+
   onMount(() => {
     if (!app.devices) loadDevices();
   });
@@ -81,8 +97,18 @@
   </div>
 
   <div class="grid">
-    <section class="card">
-      <h2><Icon name="settings" size={16} /> Fuentes</h2>
+    <section class="card panel" class:collapsed={!openSources}>
+      <button class="phead" onclick={() => (openSources = !openSources)} aria-expanded={openSources}>
+        <h2><Icon name="settings" size={16} /> Fuentes</h2>
+        {#if !openSources}
+          <span class="summary hint">
+            {[s.recordMic ? "micrófono" : "", s.recordSystem && !sysUnavailable ? "sistema" : ""].filter(Boolean).join(" + ") || "sin fuentes"}{s.liveTranscription ? " · en vivo" : ""}{s.autoTranscribeRecording ? " · transcribe al detener" : ""}
+          </span>
+        {/if}
+        <span class="chev" class:up={openSources}><Icon name="chevron" size={14} /></span>
+      </button>
+      {#if openSources}
+      <div class="pbody">
       <div class="switchrow">
         <div>
           <span class="label">Micrófono</span>
@@ -135,6 +161,23 @@
           <button class="btn sm" onclick={pickDir} disabled={rec.active}>Cambiar</button>
         </div>
       </div>
+      </div>
+      {/if}
+    </section>
+
+    <section class="card panel" class:collapsed={!openMeta}>
+      <button class="phead" onclick={() => (openMeta = !openMeta)} aria-expanded={openMeta}>
+        <h2><Icon name="doc" size={16} /> Detalles de la reunión</h2>
+        {#if !openMeta}
+          <span class="summary hint">{[app.pendingMeta.date, app.pendingMeta.place, app.pendingMeta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "sin capturar"}</span>
+        {/if}
+        <span class="chev" class:up={openMeta}><Icon name="chevron" size={14} /></span>
+      </button>
+      {#if openMeta}
+        <div class="pbody">
+          <MetaForm bind:meta={app.pendingMeta} hint="Puedes llenarlos mientras grabas; se adjuntan a la grabación y se usan para el resumen y la minuta." />
+        </div>
+      {/if}
     </section>
 
     {#if s.liveTranscription}
@@ -152,10 +195,6 @@
       </section>
     {/if}
 
-    <section class="card">
-      <h2><Icon name="doc" size={16} /> Detalles de la reunión</h2>
-      <MetaForm bind:meta={app.pendingMeta} hint="Puedes llenarlos mientras grabas; se adjuntan a la grabación y se usan para el resumen y la minuta." />
-    </section>
   </div>
 </div>
 
@@ -188,6 +227,14 @@
   .livetag { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; color: var(--accent); font-weight: 600; }
   section { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
   section h2 { display: flex; align-items: center; gap: 8px; }
+  section.panel { padding: 0; gap: 0; }
+  .phead { width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px 20px; text-align: left; border-radius: var(--radius); }
+  .phead:hover { background: var(--surface-2); }
+  .phead h2 { flex-shrink: 0; }
+  .summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chev { margin-left: auto; display: inline-flex; color: var(--muted); transition: transform 0.15s; }
+  .chev.up { transform: rotate(180deg); }
+  .pbody { display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px; }
   .switchrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .switchrow > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .input.small { margin-top: 2px; }

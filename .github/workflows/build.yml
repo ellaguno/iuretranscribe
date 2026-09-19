@@ -142,11 +142,13 @@ jobs:
           mkdir -p src-tauri/cuda-libs
           cp "$CUDA_PATH"/bin/cudart64_12.dll "$CUDA_PATH"/bin/cublas64_12.dll "$CUDA_PATH"/bin/cublasLt64_12.dll src-tauri/cuda-libs/
           ls -la src-tauri/cuda-libs
+      # CUDA y Vulkan en Windows: Ninja + MSVC (el generador de Visual Studio falla
+      # con la integración de CUDA y con el generador de shaders de Vulkan).
       - name: Entorno MSVC
-        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+        if: (matrix.features == 'cuda' || matrix.features == 'vulkan') && startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Usar Ninja para whisper.cpp (Windows + CUDA)
-        if: matrix.features == 'cuda' && startsWith(matrix.os, 'windows')
+      - name: Usar Ninja para whisper.cpp (Windows + GPU)
+        if: (matrix.features == 'cuda' || matrix.features == 'vulkan') && startsWith(matrix.os, 'windows')
         shell: bash
         run: echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
 
@@ -159,21 +161,33 @@ jobs:
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('IureTranscribe {0}', github.ref_name) || '' }}
-          releaseBody: "Instaladores generados automáticamente.\n\n- **cuda**: GPU NVIDIA (driver ≥ 525); incluye el runtime de CUDA 12, por eso pesa más.\n- **vulkan**: GPU AMD, Intel o NVIDIA vía Vulkan; ligero, requiere drivers gráficos actualizados.\n- **macos-arm64**: Apple Silicon con Metal. **macos-x64**: Mac Intel (CPU).\n- **linux-x64 / windows-x64**: sólo CPU, funcionan en cualquier equipo."
-          releaseDraft: false
-          prerelease: false
+
+      # Renombra los instaladores con la variante para que no choquen entre sí en la release.
+      - name: Renombrar instaladores
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist-release
+          shopt -s nullglob globstar
+          for f in src-tauri/target/**/release/bundle/{deb,rpm,appimage,msi,nsis,dmg}/*.{deb,rpm,AppImage,msi,exe,dmg}; do
+            ext="${f##*.}"
+            cp "$f" "dist-release/IureTranscribe_${VERSION}_${{ matrix.name }}.${ext}"
+          done
+          ls -la dist-release
+
+      - name: Publicar en la release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "IureTranscribe $TAG" --notes-file .github/release-notes.md || true
+          gh release upload "$TAG" dist-release/* --clobber
 
       - name: Publicar artefactos de compilación
         uses: actions/upload-artifact@v4
         with:
           name: iuretranscribe-${{ matrix.name }}
           if-no-files-found: ignore
-          path: |
-            src-tauri/target/**/release/bundle/deb/*.deb
-            src-tauri/target/**/release/bundle/rpm/*.rpm
-            src-tauri/target/**/release/bundle/appimage/*.AppImage
-            src-tauri/target/**/release/bundle/msi/*.msi
-            src-tauri/target/**/release/bundle/nsis/*.exe
-            src-tauri/target/**/release/bundle/dmg/*.dmg
+          path: dist-release/*
