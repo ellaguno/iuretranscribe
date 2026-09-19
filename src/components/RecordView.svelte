@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { app, loadDevices, saveSettings, startRecording, stopRecording, toast } from "../lib/state.svelte";
-  import { fmtDuration } from "../lib/format";
+  import { app, loadDevices, saveSettings, selectedModel, startRecording, stopRecording, toast } from "../lib/state.svelte";
+  import { fmtDuration, fmtTimestamp } from "../lib/format";
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
 
@@ -13,6 +13,11 @@
   let sysUnavailable = $derived(devices?.systemCapture === "unavailable");
   let canRecord = $derived((s.recordMic || (s.recordSystem && !sysUnavailable)) && !app.recordingBusy);
   let isLinux = $derived(app.sys?.platform === "linux");
+  let model = $derived(selectedModel());
+  let liveEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    if (liveEl && app.liveSegments.length) liveEl.scrollTop = liveEl.scrollHeight;
+  });
 
   onMount(() => {
     if (!app.devices) loadDevices();
@@ -52,7 +57,10 @@
       <div class="rec-info">
         {#if rec.active}
           <div class="timer">{fmtDuration(rec.elapsedSecs)}</div>
-          <div class="hint">Grabando… pulsa para detener{s.autoTranscribeRecording ? " y transcribir" : ""}.</div>
+          <div class="hint">
+            Grabando… pulsa para detener{s.autoTranscribeRecording ? " y transcribir" : ""}.
+            {#if rec.live}<span class="livetag"><Icon name="zap" size={12} /> en vivo{rec.livePendingSecs > 3 ? ` · retraso ${Math.round(rec.livePendingSecs)} s` : ""}</span>{/if}
+          </div>
         {:else}
           <div class="timer idle">00:00</div>
           <div class="hint">{canRecord ? "Pulsa para iniciar la grabación." : "Activa al menos una fuente para grabar."}</div>
@@ -98,8 +106,24 @@
       </div>
       <div class="switchrow">
         <div>
+          <span class="label">Transcribir en vivo mientras grabo</span>
+          <p class="hint">
+            Procesa el audio en bloques de {Math.round(s.liveChunkSecs)} s con el modelo {model?.name ?? "seleccionado"}{model && !model.downloaded ? " (no descargado)" : ""}.
+            {app.sys?.backend === "CPU" ? "Sin GPU conviene un modelo pequeño (Small o Turbo Q5) para que no se rezague." : ""}
+          </p>
+          <select class="input small" value={String(Math.round(s.liveChunkSecs))} disabled={rec.active || !s.liveTranscription} onchange={(e) => saveSettings({ liveChunkSecs: Number((e.target as HTMLSelectElement).value) })}>
+            <option value="5">Bloques de 5 s (más inmediato)</option>
+            <option value="8">Bloques de 8 s (recomendado)</option>
+            <option value="12">Bloques de 12 s</option>
+            <option value="20">Bloques de 20 s (mejor contexto)</option>
+          </select>
+        </div>
+        <button class="switch" class:on={s.liveTranscription} aria-label="Transcribir en vivo" disabled={rec.active} onclick={() => saveSettings({ liveTranscription: !s.liveTranscription })}></button>
+      </div>
+      <div class="switchrow">
+        <div>
           <span class="label">Transcribir automáticamente al detener</span>
-          <p class="hint">La grabación se agrega a la cola y se procesa con el modelo seleccionado.</p>
+          <p class="hint">Al detener, la grabación completa se transcribe con calidad alta (la versión en vivo es una vista previa).</p>
         </div>
         <button class="switch" class:on={s.autoTranscribeRecording} aria-label="Transcribir automáticamente" onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
       </div>
@@ -112,6 +136,21 @@
         </div>
       </div>
     </section>
+
+    {#if s.liveTranscription}
+      <section class="card live" class:full={true}>
+        <h2><Icon name="zap" size={16} /> Transcripción en vivo</h2>
+        <div class="livebox scroll" bind:this={liveEl}>
+          {#if app.liveSegments.length === 0}
+            <p class="hint">{rec.active ? "Esperando el primer bloque de audio…" : "Aquí aparecerá el texto conforme se grabe."}</p>
+          {:else}
+            {#each app.liveSegments as seg, i (i)}
+              <div class="seg"><span class="ts">{fmtTimestamp(seg.startMs)}</span><span>{seg.text}</span></div>
+            {/each}
+          {/if}
+        </div>
+      </section>
+    {/if}
 
     <section class="card">
       <h2><Icon name="doc" size={16} /> Detalles de la reunión</h2>
@@ -142,6 +181,11 @@
   .bar { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
   .bar > div { height: 100%; background: linear-gradient(90deg, var(--success), var(--warn) 80%, var(--danger)); transition: width 0.12s linear; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .live.full { grid-column: 1 / -1; }
+  .livebox { max-height: 320px; min-height: 90px; user-select: text; }
+  .seg { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); line-height: 1.5; }
+  .ts { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+  .livetag { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; color: var(--accent); font-weight: 600; }
   section { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
   section h2 { display: flex; align-items: center; gap: 8px; }
   .switchrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

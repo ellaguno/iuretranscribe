@@ -46,6 +46,7 @@ pub enum EngineEvent {
 
 pub type EventSink = Arc<dyn Fn(EngineEvent) + Send + Sync>;
 
+#[derive(Clone)]
 pub struct Options {
     pub job_id: String,
     pub input: PathBuf,
@@ -91,22 +92,32 @@ impl Engine {
     }
 
     pub fn run(&self, sink: EventSink, opts: Options, cancel: Arc<AtomicBool>) -> Result<Output> {
-        let _guard = self.busy.lock().unwrap();
         let job_id = opts.job_id.clone();
-        let progress = |stage: &str, percent: i32| {
-            sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: stage.into(), percent }));
-        };
-
-        progress("decoding", 0);
+        sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: "decoding".into(), percent: 0 }));
         let samples = crate::audio::decode_to_pcm16k(&opts.input)
             .with_context(|| format!("Error al leer {}", opts.input.display()))?;
         if cancel.load(Ordering::Relaxed) {
             return Err(anyhow!("Cancelado"));
         }
-        let audio_secs = samples.len() as f64 / crate::audio::TARGET_RATE as f64;
         if samples.len() < crate::audio::TARGET_RATE as usize / 2 {
             return Err(anyhow!("El archivo no contiene audio suficiente para transcribir"));
         }
+        self.transcribe_pcm(sink, &opts, &samples, cancel, false)
+    }
+
+    /// Transcribe PCM mono 16 kHz ya decodificado.
+    ///
+    /// En modo `live` (bloques de una grabación en curso) no se emiten eventos de
+    /// progreso, se usa decodificación rápida y se descartan segmentos sin voz.
+    pub fn transcribe_pcm(&self, sink: EventSink, opts: &Options, samples: &[f32], cancel: Arc<AtomicBool>, live: bool) -> Result<Output> {
+        let _guard = self.busy.lock().unwrap();
+        let job_id = opts.job_id.clone();
+        let audio_secs = samples.len() as f64 / crate::audio::TARGET_RATE as f64;
+        let progress = |stage: &str, percent: i32| {
+            if !live {
+                sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: stage.into(), percent }));
+            }
+        };
 
         progress("loading", 0);
         let ctx = self.context(&opts.model_path, opts.use_gpu)?;
@@ -115,8 +126,9 @@ impl Engine {
         }
         let mut state = ctx.create_state().map_err(|e| anyhow!("No se pudo inicializar whisper: {e}"))?;
 
-        let strategy = if opts.beam_size > 1 {
-            SamplingStrategy::BeamSearch { beam_size: opts.beam_size as i32, patience: -1.0 }
+        let beam = if live { 1 } else { opts.beam_size };
+        let strategy = if beam > 1 {
+            SamplingStrategy::BeamSearch { beam_size: beam as i32, patience: -1.0 }
         } else {
             SamplingStrategy::Greedy { best_of: 1 }
         };
@@ -142,33 +154,46 @@ impl Engine {
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
         params.set_token_timestamps(false);
+        if live {
+            params.set_suppress_nst(true);
+            params.set_no_context(true);
+            params.set_temperature_inc(0.0);
+        }
         if let Some(p) = opts.initial_prompt.as_deref().filter(|p| !p.trim().is_empty()) {
             params.set_initial_prompt(p);
         }
 
-        {
-            let sink = sink.clone();
-            let job_id = job_id.clone();
-            params.set_progress_callback_safe(move |p: i32| {
-                sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: "transcribing".into(), percent: p }));
-            });
+        if !live {
+            {
+                let sink = sink.clone();
+                let job_id = job_id.clone();
+                params.set_progress_callback_safe(move |p: i32| {
+                    sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: "transcribing".into(), percent: p }));
+                });
+            }
+            {
+                let sink = sink.clone();
+                let job_id = job_id.clone();
+                params.set_segment_callback_safe_lossy(move |d: whisper_rs::SegmentCallbackData| {
+                    let seg = Segment { start_ms: d.start_timestamp * 10, end_ms: d.end_timestamp * 10, text: d.text.trim().to_string() };
+                    sink(EngineEvent::Segment(SegmentEvent { job_id: job_id.clone(), segment: seg }));
+                });
+            }
         }
-        {
-            let sink = sink.clone();
-            let job_id = job_id.clone();
-            params.set_segment_callback_safe_lossy(move |d: whisper_rs::SegmentCallbackData| {
-                let seg = Segment { start_ms: d.start_timestamp * 10, end_ms: d.end_timestamp * 10, text: d.text.trim().to_string() };
-                sink(EngineEvent::Segment(SegmentEvent { job_id: job_id.clone(), segment: seg }));
-            });
+        // Callback de aborto propio: `set_abort_callback_safe` de whisper-rs 0.16 castea mal
+        // el puntero de la clausura y aborta de forma aleatoria ("failed to encode").
+        // `cancel` vive hasta el final de esta función, así que el puntero es válido.
+        unsafe extern "C" fn abort_trampoline(data: *mut std::ffi::c_void) -> bool {
+            unsafe { (*(data as *const AtomicBool)).load(Ordering::Relaxed) }
         }
-        {
-            let cancel = cancel.clone();
-            params.set_abort_callback_safe(move || cancel.load(Ordering::Relaxed));
+        unsafe {
+            params.set_abort_callback(Some(abort_trampoline));
+            params.set_abort_callback_user_data(Arc::as_ptr(&cancel) as *mut std::ffi::c_void);
         }
 
         progress("transcribing", 0);
         state
-            .full(params, &samples)
+            .full(params, samples)
             .map_err(|e| anyhow!("whisper falló: {e}"))?;
         if cancel.load(Ordering::Relaxed) {
             return Err(anyhow!("Cancelado"));
@@ -180,6 +205,9 @@ impl Engine {
             if text.is_empty() {
                 continue;
             }
+            if live && (seg.no_speech_probability() > 0.7 || is_non_speech_marker(&text)) {
+                continue;
+            }
             segments.push(Segment { start_ms: seg.start_timestamp() * 10, end_ms: seg.end_timestamp() * 10, text });
         }
         let detected_language = {
@@ -189,6 +217,12 @@ impl Engine {
         progress("transcribing", 100);
         Ok(Output { segments, audio_secs, detected_language })
     }
+}
+
+/// Textos que whisper produce ante silencio o música ("[MÚSICA]", "(Aplausos)", …).
+fn is_non_speech_marker(text: &str) -> bool {
+    let t = text.trim();
+    (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')')) || t.starts_with('♪')
 }
 
 pub fn backend_name() -> &'static str {

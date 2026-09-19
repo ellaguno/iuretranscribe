@@ -14,8 +14,9 @@ línea de comandos con una interfaz gráfica.
   cualquier momento.
 - Grabación integrada del micrófono y del audio del sistema (videollamadas,
   reuniones en el navegador) con transcripción automática al detener.
-- Aceleración por GPU: CUDA (Linux/Windows), Metal (macOS) o Vulkan, según la
-  variante compilada. La variante CPU funciona en cualquier equipo.
+- Aceleración por GPU según la variante: CUDA (NVIDIA, Linux/Windows), Vulkan
+  (AMD, Intel o NVIDIA, Linux/Windows) o Metal (Apple Silicon). La variante CPU
+  funciona en cualquier equipo.
 - Decodifica MP3, WAV, M4A/AAC, MP4, MOV, MKV, FLAC y OGG sin dependencias; si
   `ffmpeg` está instalado, también Opus, WebM y otros formatos.
 
@@ -85,12 +86,22 @@ En Linux, la primera vez importa `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` de
 ## CI
 
 `.github/workflows/build.yml` compila en cada push y, al crear una etiqueta
-`vX.Y.Z`, publica un borrador de release con instaladores para Linux (CPU y
-CUDA), Windows (CPU y CUDA) y macOS (Apple Silicon con Metal e Intel).
+`vX.Y.Z`, publica una release con instaladores para Linux (CPU, CUDA y Vulkan),
+Windows (CPU, CUDA y Vulkan) y macOS (Apple Silicon con Metal e Intel).
+
+| Variante | GPU | Tamaño aproximado |
+| --- | --- | --- |
+| `linux-x64`, `windows-x64` | ninguna (CPU) | 7–30 MB |
+| `linux-x64-vulkan`, `windows-x64-vulkan` | AMD, Intel, NVIDIA (Vulkan) | 10–30 MB |
+| `linux-x64-cuda`, `windows-x64-cuda` | NVIDIA (CUDA 12) | 450–600 MB (incluye cuBLAS) |
+| `macos-arm64` | Apple Silicon (Metal) | 4 MB |
+| `macos-x64` | ninguna (CPU) | 4 MB |
 Los artefactos de cada push (sin etiqueta) quedan en la pestaña Actions del repositorio.
 Las variantes CUDA incluyen el runtime de CUDA 12 (`cudart`, `cublas`, `cublasLt`)
-dentro del instalador, así que sólo necesitan el driver de NVIDIA. En Linux se
-distribuyen como `.deb`/`.rpm` (el AppImage no puede empaquetar esas librerías).
+dentro del instalador, así que sólo necesitan el driver de NVIDIA; `cublasLt` es
+lo que ocupa casi todo el tamaño y no se puede omitir. En Linux CUDA se
+distribuye sólo como `.deb` (el AppImage no puede empaquetar esas librerías).
+Para un instalador ligero con GPU, usa la variante Vulkan.
 
 ## Licencia
 

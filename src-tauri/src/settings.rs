@@ -40,6 +40,10 @@ pub struct Settings {
     /// Id del micrófono (cpal) o None = predeterminado.
     pub mic_device: Option<String>,
     pub auto_transcribe_recording: bool,
+    /// Transcribir en vivo mientras se graba.
+    pub live_transcription: bool,
+    /// Segundos por bloque de la transcripción en vivo.
+    pub live_chunk_secs: f64,
 }
 
 impl Default for Settings {
@@ -66,6 +70,8 @@ impl Default for Settings {
             record_system: true,
             mic_device: None,
             auto_transcribe_recording: true,
+            live_transcription: true,
+            live_chunk_secs: 8.0,
         }
     }
 }

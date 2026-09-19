@@ -22,6 +22,8 @@ export interface Settings {
   recordSystem: boolean;
   micDevice: string | null;
   autoTranscribeRecording: boolean;
+  liveTranscription: boolean;
+  liveChunkSecs: number;
 }
 
 export interface ModelInfo {
@@ -127,6 +129,14 @@ export interface RecordingStatus {
   sysLevel: number;
   path: string | null;
   error: string | null;
+  livePendingSecs: number;
+  live: boolean;
+}
+
+export interface StartRecordingInfo {
+  path: string;
+  live: boolean;
+  liveNote: string | null;
 }
 
 export interface RecordingResult {
@@ -136,7 +146,7 @@ export interface RecordingResult {
 
 export const api = {
   listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
-  startRecording: () => invoke<string>("start_recording"),
+  startRecording: () => invoke<StartRecordingInfo>("start_recording"),
   stopRecording: () => invoke<RecordingResult>("stop_recording"),
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   systemInfo: () => invoke<SystemInfo>("system_info"),

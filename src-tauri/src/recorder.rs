@@ -6,6 +6,8 @@
 //! - macOS: cpal para el micrófono; el audio del sistema requiere un dispositivo virtual.
 
 use crate::audio::TARGET_RATE;
+use crate::subtitles::Segment;
+use crate::transcribe::{Engine, EngineEvent, EventSink, Options as EngineOptions};
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -37,12 +39,21 @@ pub struct DeviceList {
     pub backend: &'static str,
 }
 
-#[derive(Debug, Clone)]
+/// Transcripción en (casi) tiempo real mientras se graba.
+pub struct LiveOptions {
+    pub engine: Arc<Engine>,
+    pub options: EngineOptions,
+    /// Segundos de audio por bloque (latencia aproximada).
+    pub chunk_secs: f64,
+    pub on_segment: Arc<dyn Fn(Segment) + Send + Sync>,
+}
+
 pub struct StartOptions {
     pub capture_mic: bool,
     pub mic_device: Option<String>,
     pub capture_system: bool,
     pub output_dir: PathBuf,
+    pub live: Option<LiveOptions>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +65,9 @@ pub struct RecordingStatus {
     pub sys_level: f32,
     pub path: Option<String>,
     pub error: Option<String>,
+    /// Segundos de audio pendientes de transcribir en vivo (retraso).
+    pub live_pending_secs: f32,
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +89,8 @@ struct Active {
     mixer: Option<JoinHandle<Result<u64>>>,
     workers: Vec<JoinHandle<()>>,
     children: Arc<Mutex<Vec<std::process::Child>>>,
+    live_worker: Option<JoinHandle<()>>,
+    live: bool,
 }
 
 #[derive(Default)]
@@ -82,6 +98,7 @@ pub struct Recorder {
     active: Mutex<Option<Active>>,
     levels: [Arc<AtomicU32>; 2],
     last_error: Arc<Mutex<Option<String>>>,
+    live_pending: Arc<AtomicU32>,
 }
 
 impl Recorder {
@@ -129,14 +146,27 @@ impl Recorder {
         }
         drop(tx);
 
+        // Transcripción en vivo: el mezclador reenvía el audio mezclado a un hilo aparte.
+        self.live_pending.store(0, Ordering::Relaxed);
+        let (live_tx, live_worker) = match opts.live {
+            Some(live) => {
+                let (ltx, lrx) = mpsc::channel::<Vec<f32>>();
+                let pending = self.live_pending.clone();
+                let err_slot = self.last_error.clone();
+                (Some(ltx), Some(std::thread::spawn(move || live_worker(lrx, live, pending, err_slot))))
+            }
+            None => (None, None),
+        };
+        let is_live = live_worker.is_some();
+
         let mixer = {
             let path = path.clone();
             let stop = stop.clone();
             let levels = [self.levels[0].clone(), self.levels[1].clone()];
             let err_slot = self.last_error.clone();
-            std::thread::spawn(move || mixer(rx, &path, sources, stop, levels, err_slot))
+            std::thread::spawn(move || mixer(rx, &path, sources, stop, levels, err_slot, live_tx))
         };
-        *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), mixer: Some(mixer), workers, children });
+        *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), mixer: Some(mixer), workers, children, live_worker, live: is_live });
         Ok(path)
     }
 
@@ -160,6 +190,11 @@ impl Recorder {
             .take()
             .map(|m| m.join().unwrap_or_else(|_| Err(anyhow!("el mezclador falló"))))
             .unwrap_or(Ok(0))?;
+        // El mezclador ya cerró el canal en vivo; espera a que transcriba lo pendiente.
+        if let Some(w) = active.live_worker.take() {
+            let _ = w.join();
+        }
+        self.live_pending.store(0, Ordering::Relaxed);
         for l in &self.levels {
             l.store(0, Ordering::Relaxed);
         }
@@ -182,8 +217,10 @@ impl Recorder {
                 sys_level: level(SYS),
                 path: Some(a.path.to_string_lossy().into_owned()),
                 error: self.last_error.lock().unwrap().clone(),
+                live_pending_secs: self.live_pending.load(Ordering::Relaxed) as f32 / 10.0,
+                live: a.live,
             },
-            None => RecordingStatus { active: false, elapsed_secs: 0.0, mic_level: 0.0, sys_level: 0.0, path: None, error: None },
+            None => RecordingStatus { active: false, elapsed_secs: 0.0, mic_level: 0.0, sys_level: 0.0, path: None, error: None, live_pending_secs: 0.0, live: false },
         }
     }
 }
@@ -196,6 +233,7 @@ fn mixer(
     stop: Arc<AtomicBool>,
     levels: [Arc<AtomicU32>; 2],
     err_slot: Arc<Mutex<Option<String>>>,
+    live_tx: Option<mpsc::Sender<Vec<f32>>>,
 ) -> Result<u64> {
     let spec = hound::WavSpec { channels: 1, sample_rate: TARGET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!("No se pudo crear {}: {e}", path.display()))?;
@@ -204,6 +242,18 @@ fn mixer(
     let mut written = 0u64;
     let to_i16 = |s: f32| (s.clamp(-1.0, 1.0) * 32767.0) as i16;
     let stall_limit = TARGET_RATE as usize * 2; // 2 s sin datos de la otra fuente → no esperar más
+    let mut live_buf: Vec<f32> = Vec::new();
+    // Escribe una muestra mezclada al WAV y la acumula para la transcripción en vivo.
+    macro_rules! put {
+        ($s:expr) => {{
+            let v: f32 = $s;
+            writer.write_sample(to_i16(v))?;
+            written += 1;
+            if live_tx.is_some() {
+                live_buf.push(v);
+            }
+        }};
+    }
 
     loop {
         match rx.recv_timeout(Duration::from_millis(150)) {
@@ -228,38 +278,129 @@ fn mixer(
         if alive[MIC] && alive[SYS] {
             let n = queues[MIC].len().min(queues[SYS].len());
             for _ in 0..n {
-                let s = queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0);
-                writer.write_sample(to_i16(s))?;
+                put!(queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0));
             }
-            written += n as u64;
             // Si una fuente se estanca (p. ej. loopback sin reproducción), no retener la otra.
             for i in [MIC, SYS] {
                 let other = 1 - i;
                 if queues[other].is_empty() && queues[i].len() > stall_limit {
                     while let Some(s) = queues[i].pop_front() {
-                        writer.write_sample(to_i16(s))?;
-                        written += 1;
+                        put!(s);
                     }
                 }
             }
         } else {
             for q in queues.iter_mut() {
                 while let Some(s) = q.pop_front() {
-                    writer.write_sample(to_i16(s))?;
-                    written += 1;
+                    put!(s);
                 }
+            }
+        }
+        if let Some(tx) = live_tx.as_ref() {
+            if !live_buf.is_empty() {
+                let _ = tx.send(std::mem::take(&mut live_buf));
             }
         }
     }
     // Vacía lo que quede, mezclando con silencio.
     let n = queues[MIC].len().max(queues[SYS].len());
     for _ in 0..n {
-        let s = queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0);
-        writer.write_sample(to_i16(s))?;
-        written += 1;
+        put!(queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0));
     }
+    if let Some(tx) = live_tx.as_ref() {
+        if !live_buf.is_empty() {
+            let _ = tx.send(live_buf);
+        }
+    }
+    drop(live_tx); // cierra el canal: el hilo en vivo transcribe lo pendiente y termina
     writer.finalize()?;
     Ok(written)
+}
+
+// ---------------------------------------------------------------------------
+// Transcripción en vivo
+// ---------------------------------------------------------------------------
+
+/// Busca, dentro de los últimos `window` muestras de `buf[..limit]`, el punto de menor
+/// energía (ventana de 100 ms) para cortar el bloque sin partir una palabra.
+fn find_cut(buf: &[f32], limit: usize, window: usize) -> usize {
+    let win = TARGET_RATE as usize / 10;
+    let start = limit.saturating_sub(window).max(win);
+    let mut best = limit;
+    let mut best_e = f32::MAX;
+    let mut i = start;
+    while i + win <= limit {
+        let e: f32 = buf[i..i + win].iter().map(|s| s * s).sum();
+        if e < best_e {
+            best_e = e;
+            best = i + win / 2;
+        }
+        i += win / 2;
+    }
+    best
+}
+
+fn rms(buf: &[f32]) -> f32 {
+    (buf.iter().map(|s| s * s).sum::<f32>() / buf.len().max(1) as f32).sqrt()
+}
+
+/// Recibe el audio mezclado, lo corta en bloques y los transcribe conforme llegan.
+fn live_worker(rx: Receiver<Vec<f32>>, live: LiveOptions, pending: Arc<AtomicU32>, err_slot: Arc<Mutex<Option<String>>>) {
+    let rate = TARGET_RATE as usize;
+    let chunk = (live.chunk_secs.max(3.0) * rate as f64) as usize;
+    let mut buf: Vec<f32> = Vec::new();
+    let mut offset: u64 = 0; // muestras ya procesadas
+    let mut prompt = String::new();
+    let mut opts = live.options.clone();
+    let sink: EventSink = Arc::new(|_: EngineEvent| {});
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let mut process = |piece: Vec<f32>, offset: &mut u64, prompt: &mut String| {
+        let offset_ms = (*offset * 1000 / rate as u64) as i64;
+        *offset += piece.len() as u64;
+        if rms(&piece) < 0.002 {
+            return; // silencio: evita alucinaciones
+        }
+        opts.initial_prompt = if prompt.is_empty() { None } else { Some(prompt.clone()) };
+        match live.engine.transcribe_pcm(sink.clone(), &opts, &piece, cancel.clone(), true) {
+            Ok(out) => {
+                let mut text = String::new();
+                for seg in out.segments {
+                    text.push(' ');
+                    text.push_str(&seg.text);
+                    (live.on_segment)(Segment { start_ms: seg.start_ms + offset_ms, end_ms: seg.end_ms + offset_ms, text: seg.text });
+                }
+                let text = text.trim().to_string();
+                if !text.is_empty() {
+                    let tail: String = text.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
+                    *prompt = tail;
+                }
+            }
+            Err(e) => {
+                log::warn!("transcripción en vivo: {e:#}");
+                *err_slot.lock().unwrap() = Some(format!("Transcripción en vivo: {e}"));
+            }
+        }
+    };
+
+    loop {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(data) => buf.extend(data),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        pending.store((buf.len() * 10 / rate) as u32, Ordering::Relaxed);
+        while buf.len() >= chunk {
+            let cut = find_cut(&buf, chunk, rate * 2);
+            let piece: Vec<f32> = buf.drain(..cut).collect();
+            process(piece, &mut offset, &mut prompt);
+            pending.store((buf.len() * 10 / rate) as u32, Ordering::Relaxed);
+        }
+    }
+    if buf.len() >= rate {
+        process(std::mem::take(&mut buf), &mut offset, &mut prompt);
+    }
+    pending.store(0, Ordering::Relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +614,50 @@ fn spawn_source(
 mod tests {
     use super::*;
 
+    /// Alimenta el hilo en vivo con un archivo de voz y comprueba que emite segmentos
+    /// ordenados. Requiere IURE_TEST_MODEL e IURE_TEST_AUDIO.
+    #[test]
+    fn live_worker_emits_segments() {
+        let (Ok(model), Ok(audio)) = (std::env::var("IURE_TEST_MODEL"), std::env::var("IURE_TEST_AUDIO")) else { return };
+        let samples = crate::audio::decode_to_pcm16k(Path::new(&audio)).expect("decode");
+        let got: Arc<Mutex<Vec<Segment>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_got = got.clone();
+        let live = LiveOptions {
+            engine: Arc::new(Engine::default()),
+            options: EngineOptions {
+                job_id: "live".into(),
+                input: PathBuf::new(),
+                model_path: PathBuf::from(model),
+                language: "es".into(),
+                translate: false,
+                use_gpu: false,
+                threads: 0,
+                beam_size: 1,
+                initial_prompt: None,
+            },
+            chunk_secs: 6.0,
+            on_segment: Arc::new(move |s| sink_got.lock().unwrap().push(s)),
+        };
+        let (tx, rx) = mpsc::channel();
+        let pending = Arc::new(AtomicU32::new(0));
+        let errs = Arc::new(Mutex::new(None));
+        let errs2 = errs.clone();
+        let h = std::thread::spawn(move || live_worker(rx, live, pending, errs));
+        for chunk in samples.chunks(TARGET_RATE as usize / 4) {
+            tx.send(chunk.to_vec()).unwrap();
+        }
+        drop(tx);
+        h.join().unwrap();
+        eprintln!("error en vivo: {:?}", errs2.lock().unwrap());
+        let segs = got.lock().unwrap();
+        let text: String = segs.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+        eprintln!("segmentos en vivo: {} → {text}", segs.len());
+        assert!(segs.len() >= 2, "pocos segmentos: {}", segs.len());
+        assert!(segs.windows(2).all(|w| w[1].start_ms >= w[0].start_ms), "segmentos desordenados");
+        assert!(segs.last().unwrap().start_ms > 5_000, "los offsets no avanzan");
+        assert!(text.to_lowercase().contains("horas"), "texto inesperado: {text}");
+    }
+
     /// Graba 2 s del micrófono y del sistema. Se omite salvo que IURE_TEST_RECORD=1.
     #[test]
     fn record_two_seconds() {
@@ -487,6 +672,7 @@ mod tests {
                 mic_device: None,
                 capture_system: std::env::var("IURE_TEST_RECORD_SYS").as_deref() != Ok("0"),
                 output_dir: dir,
+                live: None,
             })
             .expect("start");
         let secs: f64 = std::env::var("IURE_TEST_RECORD_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0);

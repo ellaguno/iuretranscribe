@@ -359,20 +359,60 @@ fn list_audio_devices() -> recorder::DeviceList {
     recorder::list_devices()
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct StartRecordingInfo {
+    path: String,
+    live: bool,
+    live_note: Option<String>,
+}
+
 #[tauri::command]
-async fn start_recording(state: State<'_, AppState>) -> Result<String, String> {
+async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<StartRecordingInfo, String> {
     let settings = state.settings.lock().unwrap().clone();
+    let mut live_note = None;
+    let live = if settings.live_transcription {
+        let model_path = models::model_path(&state.models_dir, &settings.model_id);
+        if model_path.is_file() {
+            let app = app.clone();
+            Some(recorder::LiveOptions {
+                engine: state.engine.clone(),
+                options: transcribe::Options {
+                    job_id: "live".into(),
+                    input: PathBuf::new(),
+                    model_path,
+                    language: settings.language.clone(),
+                    translate: settings.translate,
+                    use_gpu: settings.use_gpu,
+                    threads: settings.threads,
+                    beam_size: 1,
+                    initial_prompt: None,
+                },
+                chunk_secs: settings.live_chunk_secs.clamp(3.0, 30.0),
+                on_segment: Arc::new(move |seg| {
+                    let _ = app.emit("live-segment", seg);
+                }),
+            })
+        } else {
+            live_note = Some("Transcripción en vivo desactivada: el modelo seleccionado no está descargado.".into());
+            None
+        }
+    } else {
+        None
+    };
+    let is_live = live.is_some();
     let opts = recorder::StartOptions {
         capture_mic: settings.record_mic,
         mic_device: settings.mic_device.clone(),
         capture_system: settings.record_system,
         output_dir: recordings_dir(&state),
+        live,
     };
     let rec = state.recorder.clone();
     tauri::async_runtime::spawn_blocking(move || rec.start(opts))
         .await
         .map_err(|e| e.to_string())?
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| StartRecordingInfo { path: p.to_string_lossy().into_owned(), live: is_live, live_note })
         .map_err(|e| format!("{e:#}"))
 }
 

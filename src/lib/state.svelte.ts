@@ -96,7 +96,9 @@ export const app = $state({
   toasts: [] as Toast[],
   now: Date.now(),
   devices: null as DeviceList | null,
-  recording: { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null } as RecordingStatus,
+  recording: { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false } as RecordingStatus,
+  /** Segmentos transcritos en vivo durante la grabación actual. */
+  liveSegments: [] as Segment[],
   recordingBusy: false,
   /** Detalles capturados durante la grabación; se adjuntan al trabajo al detenerla. */
   pendingMeta: { participants: "", date: "", place: "", notes: "" } as JobMeta,
@@ -224,6 +226,9 @@ export async function init() {
       else if (p.status === "error") toast(`Error descargando ${name}: ${p.message ?? ""}`, "error", 8000);
     }
   });
+  await listen<Segment>("live-segment", (e) => {
+    app.liveSegments.push(e.payload);
+  });
   await getCurrentWebview().onDragDropEvent((event) => {
     const t = event.payload.type;
     if (t === "enter" || t === "over") app.dragging = true;
@@ -322,8 +327,10 @@ function stopPolling() {
 export async function startRecording() {
   if (app.recordingBusy || app.recording.active) return;
   app.recordingBusy = true;
+  app.liveSegments = [];
   try {
-    await api.startRecording();
+    const info = await api.startRecording();
+    if (info.liveNote) toast(info.liveNote, "info", 7000);
     await pollRecording();
     if (!pollTimer) pollTimer = setInterval(pollRecording, 250);
   } catch (e) {
@@ -339,17 +346,19 @@ export async function stopRecording() {
   stopPolling();
   try {
     const res = await api.stopRecording();
-    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null };
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
     const [job] = await addFiles([res.path]);
     if (job) {
       job.meta = { ...app.pendingMeta };
+      job.liveSegments = app.liveSegments.map((s) => ({ ...s }));
       app.selectedJobId = job.id;
     }
+    app.liveSegments = [];
     app.pendingMeta = emptyMeta();
     toast(`Grabación guardada (${Math.round(res.durationSecs)} s)`, "success");
     if (app.settings?.autoTranscribeRecording) await startQueue();
   } catch (e) {
-    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null };
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
     toast(String(e), "error", 9000);
   } finally {
     app.recordingBusy = false;

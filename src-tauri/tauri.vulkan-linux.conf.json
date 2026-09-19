@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "linux": {
+      "deb": { "depends": ["libvulkan1"] }
+    }
+  }
+}

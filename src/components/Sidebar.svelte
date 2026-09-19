@@ -2,6 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { app, selectedModel, toast, type View } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
+  import iconUrl from "../assets/icon.png";
 
   const links = [
     { label: "Sitio web", url: "https://iurefficient.com", icon: "globe" },
@@ -24,7 +25,7 @@
 
 <aside class="sidebar">
   <div class="brand">
-    <div class="logo"><Icon name="waveform" size={20} stroke={2.5} /></div>
+    <img class="logo" src={iconUrl} alt="" width="40" height="40" />
     <div>
       <div class="name">IureTranscribe</div>
       <div class="ver">v{app.sys?.version ?? ""}</div>
@@ -79,7 +80,7 @@
 <style>
   .sidebar { display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; gap: 16px; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
-  .logo { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #1e3a8a, #0f766e); }
+  .logo { width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; }
   .name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
   .ver { font-size: 11.5px; color: var(--muted); }
   nav { display: flex; flex-direction: column; gap: 2px; }

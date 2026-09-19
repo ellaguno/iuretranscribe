@@ -31,8 +31,13 @@ jobs:
           - name: linux-x64-cuda
             os: ubuntu-22.04
             features: "cuda"
-            # Sin AppImage: linuxdeploy no puede resolver las librerías de CUDA.
-            args: "--bundles deb rpm --config src-tauri/tauri.cuda-linux.conf.json"
+            # Sólo .deb: linuxdeploy no puede resolver las librerías de CUDA y el .rpm
+            # duplicaría los ~600 MB del runtime.
+            args: "--bundles deb --config src-tauri/tauri.cuda-linux.conf.json"
+          - name: linux-x64-vulkan
+            os: ubuntu-22.04
+            features: "vulkan"
+            args: "--config src-tauri/tauri.vulkan-linux.conf.json"
           - name: windows-x64
             os: windows-latest
             features: ""
@@ -42,6 +47,10 @@ jobs:
             features: "cuda"
             # Sólo NSIS: el .msi duplicaría los ~500 MB del runtime de CUDA.
             args: "--bundles nsis --config src-tauri/tauri.cuda-windows.conf.json"
+          - name: windows-x64-vulkan
+            os: windows-latest
+            features: "vulkan"
+            args: "--bundles nsis"
           - name: macos-arm64
             os: macos-latest
             features: "metal"
@@ -73,6 +82,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf build-essential cmake libclang-dev libssl-dev
+
+      # --- Vulkan (AMD / Intel / NVIDIA sin CUDA): sólo hace falta el SDK para compilar los shaders.
+      - name: Vulkan SDK (Linux)
+        if: matrix.features == 'vulkan' && startsWith(matrix.os, 'ubuntu')
+        run: sudo apt-get install -y libvulkan-dev glslc
+      - name: Vulkan SDK (Windows)
+        if: matrix.features == 'vulkan' && startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile vulkan-sdk.exe
+          Start-Process -Wait -FilePath .\vulkan-sdk.exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install"
+          $sdk = (Get-ChildItem C:\VulkanSDK | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          Write-Host "Vulkan SDK en $sdk"
 
       # --- CUDA (Linux): sólo los paquetes necesarios del repositorio de NVIDIA.
       - name: CUDA toolkit (Linux)
@@ -131,8 +155,8 @@ jobs:
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('IureTranscribe {0}', github.ref_name) || '' }}
-          releaseBody: "Instaladores generados automáticamente. Las variantes *cuda* incluyen el runtime de CUDA 12 y sólo requieren una GPU NVIDIA con driver reciente (≥ 525). Las demás funcionan en cualquier equipo: CPU, o Metal en Mac con Apple Silicon."
-          releaseDraft: true
+          releaseBody: "Instaladores generados automáticamente.\n\n- **cuda**: GPU NVIDIA (driver ≥ 525); incluye el runtime de CUDA 12, por eso pesa más.\n- **vulkan**: GPU AMD, Intel o NVIDIA vía Vulkan; ligero, requiere drivers gráficos actualizados.\n- **macos-arm64**: Apple Silicon con Metal. **macos-x64**: Mac Intel (CPU).\n- **linux-x64 / windows-x64**: sólo CPU, funcionan en cualquier equipo."
+          releaseDraft: false
           prerelease: false
 
       - name: Publicar artefactos de compilación
