@@ -161,6 +161,8 @@ export const app = $state({
   pendingMeta: { participants: "", date: "", place: "", notes: "" } as JobMeta,
   /** Sesión REST con Iurefficient (null = no comprobada todavía). */
   iureSession: null as IureSessionStatus | null,
+  /** Versión nueva disponible en GitHub, si se detectó. */
+  updateNotice: null as { version: string; url: string } | null,
 });
 
 let toastSeq = 0;
@@ -274,6 +276,11 @@ export async function init() {
   await restoreJobs();
   startPersistence();
   refreshIureSession();
+  if (settings.checkUpdates) {
+    setTimeout(() => {
+      import("./updater").then((m) => m.checkForUpdates(true)).catch(() => {});
+    }, 6000);
+  }
   pollRecording().then(() => {
     if (app.recording.active && !pollTimer) pollTimer = setInterval(pollRecording, 250);
   });

@@ -47,6 +47,8 @@ struct SystemInfo {
     ffmpeg_available: bool,
     recordings_dir: String,
     version: &'static str,
+    /// Identificador de plataforma y variante para el actualizador (p. ej. `linux-x86_64-cuda`).
+    update_target: String,
     supported_extensions: &'static [&'static str],
 }
 
@@ -130,8 +132,39 @@ fn system_info(state: State<'_, AppState>) -> SystemInfo {
         ffmpeg_available: ffmpeg_available(),
         recordings_dir: recordings_dir(&state).to_string_lossy().into_owned(),
         version: env!("CARGO_PKG_VERSION"),
+        update_target: update_target(),
         supported_extensions: audio::SUPPORTED_EXTENSIONS,
     }
+}
+
+/// `os-arch[-variante]`: las variantes con GPU se actualizan sólo con su propio instalador.
+fn update_target() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    let variant = match transcribe::backend_name() {
+        "CUDA" => "-cuda",
+        "Vulkan" => "-vulkan",
+        _ => "",
+    };
+    format!("{os}-{}{variant}", std::env::consts::ARCH)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateNotice {
+    version: String,
+    url: String,
+}
+
+/// Aviso de versión nueva en GitHub (sin instalar): funciona para cualquier instalador.
+#[tauri::command]
+async fn check_update_notice() -> Result<Option<UpdateNotice>, String> {
+    let r = iurefficient_connect::releases::consultar("ellaguno/iuretranscribe", env!("CARGO_PKG_VERSION"), &iure_user_agent())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(r.map(|r| UpdateNotice { version: r.version, url: r.url }))
 }
 
 #[tauri::command]
@@ -1003,6 +1036,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
@@ -1035,6 +1070,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             system_info,
+            check_update_notice,
             get_settings,
             save_settings,
             list_models,

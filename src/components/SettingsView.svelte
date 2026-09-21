@@ -301,6 +301,14 @@
         <button class:active={s.theme === id} onclick={() => saveSettings({ theme: id as "system" | "light" | "dark" })}><Icon name={icon} size={15} /> {label}</button>
       {/each}
     </div>
+    <div class="switchrow">
+      <div>
+        <span class="label">Avisar de versiones nuevas</span>
+        <p class="hint">Al arrancar consulta las releases de GitHub. Versión instalada: {app.sys?.version} ({app.sys?.updateTarget}). Si la app se instaló como AppImage, en Windows o en macOS puede actualizarse sola; con .deb/.rpm sólo avisa.</p>
+      </div>
+      <button class="switch" class:on={s.checkUpdates} aria-label="Avisar de versiones nuevas" onclick={() => saveSettings({ checkUpdates: !s.checkUpdates })}></button>
+    </div>
+    <div><button class="btn sm" onclick={() => import("../lib/updater").then((m) => m.checkForUpdates(false))}><Icon name="refresh" size={14} /> Buscar actualizaciones ahora</button></div>
     <p class="hint">Modelos en: <code>{app.sys?.modelsDir}</code><br />Ajustes en: <code>{app.sys?.settingsPath}</code></p>
   </section>
 </div>

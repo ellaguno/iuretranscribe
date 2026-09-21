@@ -58,6 +58,12 @@
     {/each}
   </div>
 
+  {#if app.updateNotice}
+    <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title="Abrir la página de descarga">
+      <Icon name="download" size={14} />
+      <span>Nueva versión {app.updateNotice.version}</span>
+    </button>
+  {/if}
   <div class="foot">
     <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? "Conectado a Iurefficient" : "Conectar con Iurefficient"}>
       <Icon name="cloud" size={15} />
@@ -103,6 +109,8 @@
   .row { display: flex; align-items: center; gap: 7px; overflow: hidden; }
   .row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .warn { color: var(--warn); }
+  .update { display: flex; align-items: center; gap: 8px; margin: 0 4px 6px; padding: 8px 10px; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-weight: 650; font-size: 13px; }
+  .update:hover { background: var(--accent-hover); }
   .conn { text-align: left; color: var(--accent); font-weight: 600; padding: 4px 0; }
   .conn.ok { color: var(--success); font-weight: 550; }
   .conn:hover { text-decoration: underline; }

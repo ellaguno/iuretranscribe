@@ -107,6 +107,14 @@ Las features de GPU son de compilación: el binario resultante muestra el
 backend en la barra lateral y en Ajustes. Si la GPU falla en tiempo de
 ejecución, desactiva «Usar GPU» en Ajustes para caer a CPU.
 
+## Actualizaciones
+
+Al arrancar, la app consulta las releases de GitHub. Si la instalación lo permite
+(AppImage en Linux, Windows, macOS) ofrece descargar e instalar la nueva versión
+dentro de la app, con artefactos firmados (`latest.json` por plataforma y
+variante); con `.deb`/`.rpm` sólo avisa y enlaza la descarga. Se puede desactivar
+en Ajustes → Apariencia → «Avisar de versiones nuevas».
+
 ## Dónde guarda las cosas
 
 | Qué | Linux | Windows | macOS |

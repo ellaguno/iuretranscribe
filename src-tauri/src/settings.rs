@@ -60,6 +60,8 @@ pub struct Settings {
     pub speaker_split: bool,
     /// Nombre del usuario para etiquetar el micrófono.
     pub my_name: String,
+    /// Consultar en GitHub si hay una versión nueva al arrancar.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -97,6 +99,7 @@ impl Default for Settings {
             iure_auto_compose: true,
             speaker_split: true,
             my_name: String::new(),
+            check_updates: true,
         }
     }
 }

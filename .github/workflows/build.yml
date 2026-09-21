@@ -171,6 +171,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Firma de los artefactos del actualizador (.sig). Sin estos secretos se
+          # compila igual, pero la app sólo podrá avisar de versiones nuevas.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
@@ -183,9 +187,17 @@ jobs:
           mkdir -p dist-release
           # bash 3.2 de macOS no tiene globstar: se usa find.
           find "${CARGO_TARGET_DIR:-src-tauri/target}" -path '*/release/bundle/*' -type f \
-            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \) \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \
+               -o -name '*.AppImage.sig' -o -name '*-setup.exe.sig' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \) \
             -print | while read -r f; do
-            ext="${f##*.}"
+            base="$(basename "$f")"
+            case "$base" in
+              *.app.tar.gz.sig) ext="app.tar.gz.sig" ;;
+              *.app.tar.gz)     ext="app.tar.gz" ;;
+              *.AppImage.sig)   ext="AppImage.sig" ;;
+              *-setup.exe.sig)  ext="exe.sig" ;;
+              *)                ext="${base##*.}" ;;
+            esac
             cp "$f" "dist-release/IureTranscribe_${VERSION}_${{ matrix.name }}.${ext}"
           done
           ls -la dist-release
@@ -206,3 +218,47 @@ jobs:
           name: iuretranscribe-${{ matrix.name }}
           if-no-files-found: ignore
           path: dist-release/*
+
+  # Manifiesto del actualizador: una entrada por plataforma y variante, con las
+  # firmas generadas por cada trabajo. Las instalaciones .deb/.rpm no se
+  # actualizan solas (la app avisa y enlaza la release).
+  manifest:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Generar latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, glob, datetime
+          tag = os.environ["GITHUB_REF_NAME"]; version = tag.lstrip("v")
+          base = f"https://github.com/ellaguno/iuretranscribe/releases/download/{tag}/"
+          # nombre de variante en los archivos → clave del actualizador (os-arch[-variante])
+          targets = {
+            "linux-x64": "linux-x86_64", "linux-x64-vulkan": "linux-x86_64-vulkan", "linux-x64-cuda": "linux-x86_64-cuda",
+            "windows-x64": "windows-x86_64", "windows-x64-vulkan": "windows-x86_64-vulkan", "windows-x64-cuda": "windows-x86_64-cuda",
+            "macos-arm64": "darwin-aarch64", "macos-x64": "darwin-x86_64",
+          }
+          platforms = {}
+          for sig in glob.glob("artifacts/**/*.sig", recursive=True):
+              name = os.path.basename(sig)
+              asset = name[:-4]  # sin .sig
+              variant = None
+              for v in targets:
+                  if asset.startswith(f"IureTranscribe_{version}_{v}."):
+                      variant = v
+              if not variant:
+                  continue
+              platforms[targets[variant]] = {"url": base + asset, "signature": open(sig).read().strip()}
+          manifest = {"version": version, "notes": f"IureTranscribe {version}", "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "platforms": platforms}
+          json.dump(manifest, open("latest.json", "w"), indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber

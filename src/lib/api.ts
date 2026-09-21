@@ -33,6 +33,7 @@ export interface Settings {
   iureAutoCompose: boolean;
   speakerSplit: boolean;
   myName: string;
+  checkUpdates: boolean;
 }
 
 export interface IureEntry {
@@ -190,6 +191,7 @@ export interface SystemInfo {
   ffmpegAvailable: boolean;
   recordingsDir: string;
   version: string;
+  updateTarget: string;
   supportedExtensions: string[];
 }
 
@@ -297,7 +299,13 @@ export interface RecordingResult {
   durationSecs: number;
 }
 
+export interface UpdateNotice {
+  version: string;
+  url: string;
+}
+
 export const api = {
+  checkUpdateNotice: () => invoke<UpdateNotice | null>("check_update_notice"),
   iureTestConnection: () => invoke<IureConnectionInfo>("iure_test_connection"),
   iureList: (folder: string) => invoke<IureListing>("iure_list", { folder }),
   iureUpload: (jobId: string, folder: string, files: string[]) =>
