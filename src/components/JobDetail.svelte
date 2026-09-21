@@ -1,12 +1,16 @@
 <script lang="ts">
   import { api, type DocKind } from "../lib/api";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { app, generateDoc, isActive, metaFilled, metaFilledByUser, retranscribe, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
+  import IurePicker from "./IurePicker.svelte";
+  import { iureConfigured } from "../lib/state.svelte";
 
   let { job }: { job: Job } = $props();
+  let showPicker = $state(false);
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
   let filled = $derived(metaFilled(job.meta));
   // Abierto por defecto mientras no se hayan capturado datos; plegado cuando ya hay.
@@ -52,6 +56,10 @@
   }
 </script>
 
+{#if showPicker}
+  <IurePicker {job} onclose={() => (showPicker = false)} />
+{/if}
+
 <div class="card panel">
   <div class="phead">
     <div class="ptitle">
@@ -61,6 +69,7 @@
           <span><Icon name="clock" size={13} /> Audio {fmtDuration(job.result.audioSecs)}</span>
           <span><Icon name="zap" size={13} /> Transcrito en {fmtDuration(job.result.elapsedSecs)} ({fmtSpeed(job.result.audioSecs, job.result.elapsedSecs)})</span>
           {#if job.result.detectedLanguage}<span>Idioma: {job.result.detectedLanguage}</span>{/if}
+          {#if job.iure}<span class="iure" title={job.iure.files.join(", ")}><Icon name="cloud" size={13} /> Iurefficient: {job.iure.folder || "raíz"}</span>{/if}
         </div>
       {:else if isActive(job)}
         <div class="stats"><span class="spin"><Icon name="loader" size={13} /></span><span>Procesando…</span></div>
@@ -73,6 +82,16 @@
         {/each}
         <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
         <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
+        {#if iureConfigured()}
+          <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? `Guardado en ${job.iure.folder} · volver a subir` : "Subir transcripción, resumen y minuta a un proyecto de Iurefficient"} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>
+            <Icon name="upload" size={14} /> {job.iure ? "Guardado en Iurefficient" : "Guardar en Iurefficient"}
+          </button>
+          {#if job.iure}
+            <button class="btn sm ghost" title="Abrir Iurefficient en el navegador" onclick={() => openUrl(job.iure!.webUrl)}><Icon name="external" size={14} /></button>
+          {/if}
+        {:else}
+          <button class="btn sm ghost" title="Conecta tu cuenta de Iurefficient en Ajustes para guardar directo en un proyecto" onclick={() => (app.view = "settings")}><Icon name="cloud" size={14} /> Iurefficient</button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -164,6 +183,7 @@
   .ptitle h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
   .stats span { display: inline-flex; align-items: center; gap: 5px; }
+  .stats .iure { color: var(--accent); }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .outputs { display: flex; gap: 6px; flex-shrink: 0; align-items: flex-start; }
   .meta { border-top: 1px solid var(--border); }

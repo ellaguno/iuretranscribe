@@ -1,4 +1,5 @@
 mod audio;
+mod iurefficient;
 mod llm;
 mod models;
 mod recorder;
@@ -475,6 +476,85 @@ fn recording_status(state: State<'_, AppState>) -> recorder::RecordingStatus {
     state.recorder.status()
 }
 
+// ---------------------------------------------------------------------------
+// Iurefficient (fase 0: WebDAV con contraseña de aplicación)
+// ---------------------------------------------------------------------------
+fn iure_account(state: &AppState) -> Result<iurefficient::Account, String> {
+    let s = state.settings.lock().unwrap().clone();
+    iurefficient::Account::new(&s.iure_domain, &s.iure_email, &s.iure_app_password).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn iure_test_connection(state: State<'_, AppState>) -> Result<iurefficient::ConnectionInfo, String> {
+    let acc = iure_account(&state)?;
+    iurefficient::test_connection(&acc).await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn iure_list(state: State<'_, AppState>, folder: String) -> Result<iurefficient::Listing, String> {
+    let acc = iure_account(&state)?;
+    iurefficient::list(&acc, &folder).await.map_err(|e| format!("{e:#}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureUploadRequest {
+    job_id: String,
+    folder: String,
+    /// Rutas locales a subir, en orden.
+    files: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct IureUploadProgress {
+    job_id: String,
+    file_name: String,
+    index: usize,
+    total_files: usize,
+    sent: u64,
+    total: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureUploadResult {
+    folder: String,
+    web_url: String,
+    uploaded: Vec<iurefficient::Uploaded>,
+}
+
+#[tauri::command]
+async fn iure_upload(app: AppHandle, state: State<'_, AppState>, request: IureUploadRequest) -> Result<IureUploadResult, String> {
+    let acc = iure_account(&state)?;
+    let total_files = request.files.len();
+    let mut uploaded = Vec::new();
+    for (index, f) in request.files.iter().enumerate() {
+        let local = PathBuf::from(f);
+        let file_name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let app2 = app.clone();
+        let job_id = request.job_id.clone();
+        let fname = file_name.clone();
+        let mut last = std::time::Instant::now();
+        let res = iurefficient::upload(&acc, &request.folder, &local, None, move |sent, total| {
+            if last.elapsed().as_millis() > 120 || sent == total {
+                last = std::time::Instant::now();
+                let _ = app2.emit("iure-upload-progress", IureUploadProgress { job_id: job_id.clone(), file_name: fname.clone(), index, total_files, sent, total });
+            }
+        })
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+        uploaded.push(res);
+    }
+    // Recuerda la carpeta para la próxima vez.
+    {
+        let mut s = state.settings.lock().unwrap();
+        s.iure_last_folder = Some(request.folder.clone());
+        let _ = s.save(&state.settings_path);
+    }
+    Ok(IureUploadResult { folder: request.folder, web_url: acc.web_url(), uploaded })
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -537,6 +617,9 @@ pub fn run() {
             load_jobs,
             save_jobs,
             load_documents,
+            iure_test_connection,
+            iure_list,
+            iure_upload,
             list_audio_devices,
             start_recording,
             stop_recording,

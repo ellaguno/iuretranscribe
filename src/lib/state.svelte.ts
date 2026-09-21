@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
+  type IureUploadProgress,
   type DeviceList,
   type DocKind,
   type RecordingStatus,
@@ -67,6 +68,14 @@ export function metaFilled(m: JobMeta): boolean {
   return !!(m.date.trim() || m.place.trim() || m.participants.trim() || m.notes.trim());
 }
 
+/** Resultado de guardar un trabajo en Iurefficient. */
+export interface IureSaved {
+  folder: string;
+  webUrl: string;
+  files: string[];
+  savedAt: number;
+}
+
 export interface Job {
   id: string;
   path: string;
@@ -81,6 +90,8 @@ export interface Job {
   summary: DocState;
   minutes: DocState;
   meta: JobMeta;
+  iure?: IureSaved;
+  iureUpload?: { fileName: string; index: number; totalFiles: number; sent: number; total: number } | null;
   startedAt?: number;
   finishedAt?: number;
 }
@@ -153,6 +164,7 @@ function serializeJobs(): string {
     summary: j.summary.status === "loading" ? { status: "idle" } : j.summary,
     minutes: j.minutes.status === "loading" ? { status: "idle" } : j.minutes,
     meta: { participants: j.meta.participants, date: j.meta.date, place: j.meta.place, notes: j.meta.notes },
+    iure: j.iure,
     startedAt: j.startedAt,
     finishedAt: j.finishedAt,
   }));
@@ -239,6 +251,10 @@ export async function init() {
       if (p.status === "done") toast(`Modelo ${name} descargado`, "success");
       else if (p.status === "error") toast(`Error descargando ${name}: ${p.message ?? ""}`, "error", 8000);
     }
+  });
+  await listen<IureUploadProgress>("iure-upload-progress", (e) => {
+    const job = app.jobs.find((j) => j.id === e.payload.jobId);
+    if (job) job.iureUpload = { fileName: e.payload.fileName, index: e.payload.index, totalFiles: e.payload.totalFiles, sent: e.payload.sent, total: e.payload.total };
   });
   await listen<Segment>("live-segment", (e) => {
     app.liveSegments.push(e.payload);
@@ -496,6 +512,43 @@ async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number
     job.status = "queued";
     toast(`No se pudo guardar la transcripción en vivo: ${e}. Se transcribirá de nuevo.`, "error", 8000);
     await startQueue();
+  }
+}
+
+export function iureConfigured(): boolean {
+  const s = app.settings;
+  return !!(s && s.iureDomain.trim() && s.iureEmail.trim() && s.iureAppPassword.trim());
+}
+
+/** Archivos locales que se subirían a Iurefficient para un trabajo terminado. */
+export function iureFilesFor(job: Job, includeMedia: boolean): string[] {
+  const files: string[] = [];
+  if (includeMedia) files.push(job.path);
+  if (job.result) for (const o of job.result.outputs) files.push(o.path);
+  if (job.summary.status === "done" && job.summary.path) files.push(job.summary.path);
+  if (job.minutes.status === "done" && job.minutes.path) files.push(job.minutes.path);
+  return files;
+}
+
+export async function saveToIurefficient(job: Job, folder: string, includeMedia: boolean): Promise<boolean> {
+  const files = iureFilesFor(job, includeMedia);
+  if (!files.length) {
+    toast("No hay archivos que subir todavía", "error");
+    return false;
+  }
+  job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
+  try {
+    const res = await api.iureUpload(job.id, folder, files);
+    job.iure = { folder: res.folder, webUrl: res.webUrl, files: res.uploaded.map((u) => u.fileName), savedAt: Date.now() };
+    if (app.settings) app.settings.iureLastFolder = res.folder;
+    const versions = res.uploaded.filter((u) => !u.created).length;
+    toast(`Guardado en Iurefficient (${res.uploaded.length} archivo(s)${versions ? `, ${versions} como versión nueva` : ""})`, "success", 6000);
+    return true;
+  } catch (e) {
+    toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);
+    return false;
+  } finally {
+    job.iureUpload = null;
   }
 }
 

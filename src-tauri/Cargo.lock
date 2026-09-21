@@ -2082,9 +2082,10 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "iuretranscribe"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "chrono",
  "cpal",
  "dirs",
@@ -2092,7 +2093,9 @@ dependencies = [
  "futures-util",
  "hound",
  "log",
+ "percent-encoding",
  "reqwest 0.12.28",
+ "roxmltree",
  "serde",
  "serde_json",
  "symphonia",
@@ -2102,6 +2105,7 @@ dependencies = [
  "tauri-plugin-opener",
  "thiserror 2.0.20",
  "tokio",
+ "url",
  "uuid",
  "whisper-rs",
 ]
@@ -3505,6 +3509,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

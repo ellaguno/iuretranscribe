@@ -25,6 +25,51 @@ export interface Settings {
   liveTranscription: boolean;
   liveChunkSecs: number;
   liveIsFinal: boolean;
+  iureDomain: string;
+  iureEmail: string;
+  iureAppPassword: string;
+  iureUploadMedia: boolean;
+  iureLastFolder: string | null;
+}
+
+export interface IureEntry {
+  name: string;
+  path: string;
+  isFolder: boolean;
+  canUpload: boolean;
+  size: number | null;
+}
+
+export interface IureListing {
+  path: string;
+  canUpload: boolean;
+  entries: IureEntry[];
+}
+
+export interface IureConnectionInfo {
+  webUrl: string;
+  rootFolders: string[];
+}
+
+export interface IureUploaded {
+  fileName: string;
+  remotePath: string;
+  created: boolean;
+}
+
+export interface IureUploadResult {
+  folder: string;
+  webUrl: string;
+  uploaded: IureUploaded[];
+}
+
+export interface IureUploadProgress {
+  jobId: string;
+  fileName: string;
+  index: number;
+  totalFiles: number;
+  sent: number;
+  total: number;
 }
 
 export interface ModelInfo {
@@ -147,6 +192,10 @@ export interface RecordingResult {
 }
 
 export const api = {
+  iureTestConnection: () => invoke<IureConnectionInfo>("iure_test_connection"),
+  iureList: (folder: string) => invoke<IureListing>("iure_list", { folder }),
+  iureUpload: (jobId: string, folder: string, files: string[]) =>
+    invoke<IureUploadResult>("iure_upload", { request: { jobId, folder, files } }),
   listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
   startRecording: () => invoke<StartRecordingInfo>("start_recording"),
   stopRecording: () => invoke<RecordingResult>("stop_recording"),

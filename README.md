@@ -21,6 +21,24 @@ línea de comandos con una interfaz gráfica.
 - Decodifica MP3, WAV, M4A/AAC, MP4, MOV, MKV, FLAC y OGG sin dependencias; si
   `ffmpeg` está instalado, también Opus, WebM y otros formatos.
 
+## Conexión con Iurefficient
+
+En Ajustes → Cuenta de Iurefficient se indica el dominio de la instancia, el correo
+y una **contraseña de aplicación** (`iurdav_…`, la misma que usa IureDav; la genera
+cada usuario en su perfil y requiere que un administrador tenga WebDAV activado).
+Con la cuenta conectada, cada archivo transcrito tiene el botón **Guardar en
+Iurefficient**: se elige la carpeta del cliente y proyecto (o `General`) y se suben
+la transcripción (SRT/TXT/…), el resumen, la minuta y, opcionalmente, el audio o
+video original. Un archivo con el mismo nombre se guarda como versión nueva, no como
+duplicado, igual que en la aplicación web.
+
+Esta es la fase 0 de la integración, que no requiere cambios en el servidor. El
+conector vive en `src-tauri/src/iurefficient.rs` sin dependencias de Tauri, para
+extraerlo a un crate común (`iurefficient-connect`) cuando lo use otra aplicación.
+Las siguientes fases (resumen y minuta con el motor de Iurefficient, adjuntar a una
+oportunidad o lead del CRM, registrar horas) necesitan una llave de aplicación para
+la API REST de la instancia.
+
 ## Grabación
 
 | Plataforma | Micrófono | Audio del sistema (bocina) |

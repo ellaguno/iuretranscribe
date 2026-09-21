@@ -46,6 +46,14 @@ pub struct Settings {
     pub live_chunk_secs: f64,
     /// Al detener, usar la transcripción en vivo como resultado final (sin repetir).
     pub live_is_final: bool,
+    /// Cuenta de Iurefficient (fase 0: WebDAV con contraseña de aplicación `iurdav_…`).
+    pub iure_domain: String,
+    pub iure_email: String,
+    pub iure_app_password: String,
+    /// Subir también el audio/video original al guardar en Iurefficient.
+    pub iure_upload_media: bool,
+    /// Última carpeta WebDAV usada al guardar (ruta relativa, p. ej. "Clientes/Acme/Proyecto X").
+    pub iure_last_folder: Option<String>,
 }
 
 impl Default for Settings {
@@ -75,6 +83,11 @@ impl Default for Settings {
             live_transcription: true,
             live_chunk_secs: 8.0,
             live_is_final: true,
+            iure_domain: String::new(),
+            iure_email: String::new(),
+            iure_app_password: String::new(),
+            iure_upload_media: true,
+            iure_last_folder: None,
         }
     }
 }
