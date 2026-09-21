@@ -1,13 +1,43 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { app, saveSettings, toast } from "../lib/state.svelte";
+  import { app, refreshIureSession, saveSettings, toast } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
 
   let s = $derived(app.settings!);
   let showKey = $state(false);
   let showIurePass = $state(false);
   let iureTesting = $state(false);
+  let loginPassword = $state("");
+  let loginTotp = $state("");
+  let totpToken = $state<string | null>(null);
+  let loggingIn = $state(false);
+  async function login() {
+    loggingIn = true;
+    clearTimeout(saveTimer);
+    await saveSettings({});
+    try {
+      const r = await api.iureLogin(loginPassword, totpToken ? loginTotp : undefined, totpToken ?? undefined);
+      if (r.requiresTotp) {
+        totpToken = r.totpToken;
+        toast("Introduce el código de verificación en dos pasos", "info");
+      } else if (r.loggedIn) {
+        loginPassword = "";
+        loginTotp = "";
+        totpToken = null;
+        await refreshIureSession();
+        toast(`Sesión iniciada${r.name ? ` como ${r.name}` : ""}`, "success");
+      }
+    } catch (e) {
+      toast(String(e), "error", 8000);
+    } finally {
+      loggingIn = false;
+    }
+  }
+  async function logout() {
+    await api.iureLogout();
+    await refreshIureSession();
+  }
   let iureResult = $state<{ ok: boolean; text: string } | null>(null);
   async function testIure() {
     iureTesting = true;
@@ -215,6 +245,28 @@
         </div>
       </div>
     </div>
+    <div class="login card-inner">
+      <h3>Sesión para proyectos, minutas y CRM</h3>
+      <p class="hint">Con la sesión iniciada (tu contraseña normal de Iurefficient, no la de aplicación) puedes guardar directo en un {app.iureSession?.terminology?.case ?? "proyecto"}, generar la minuta con el motor de Iurefficient, adjuntar a un lead u oportunidad y registrar horas. La contraseña no se guarda: sólo la sesión, en el llavero, y dura 30 días.</p>
+      {#if app.iureSession?.loggedIn}
+        <div class="row">
+          <span class="pill success"><Icon name="check" size={12} stroke={3} /> Sesión iniciada como {app.iureSession.name ?? app.iureSession.email}{app.iureSession.crm ? " · CRM disponible" : ""}</span>
+          <button class="btn sm ghost" onclick={logout}>Cerrar sesión</button>
+        </div>
+      {:else}
+        <div class="row">
+          {#if totpToken}
+            <input class="input" placeholder="Código de verificación (6 dígitos)" bind:value={loginTotp} inputmode="numeric" autocomplete="one-time-code" />
+          {:else}
+            <input class="input" type="password" placeholder="Contraseña de Iurefficient" bind:value={loginPassword} autocomplete="current-password" onkeydown={(e) => e.key === "Enter" && login()} />
+          {/if}
+          <button class="btn primary" onclick={login} disabled={loggingIn || !s.iureDomain || !s.iureEmail || (totpToken ? loginTotp.length < 6 : !loginPassword)}>
+            {#if loggingIn}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="key" size={15} />{/if} {totpToken ? "Verificar" : "Iniciar sesión"}
+          </button>
+        </div>
+        {#if app.iureSession?.error && s.iureDomain && s.iureEmail}<p class="hint errmsg">{app.iureSession.error}</p>{/if}
+      {/if}
+    </div>
     <div class="row">
       <button class="btn" onclick={testIure} disabled={iureTesting || !s.iureDomain || !s.iureEmail || !s.iureAppPassword}>
         {#if iureTesting}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="check" size={15} />{/if} Probar conexión
@@ -250,6 +302,8 @@
   .note { display: flex; gap: 6px; align-items: flex-start; }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .okmsg { color: var(--success); }
+  .login { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+  .login .row .input { max-width: 340px; }
   .errmsg { color: var(--danger); }
   .seg { display: inline-flex; background: var(--surface-2); padding: 3px; border-radius: 10px; gap: 2px; width: fit-content; }
   .seg button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; color: var(--text-2); font-weight: 550; }

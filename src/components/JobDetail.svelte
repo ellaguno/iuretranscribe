@@ -8,7 +8,32 @@
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
   import IurePicker from "./IurePicker.svelte";
-  import { iureConfigured } from "../lib/state.svelte";
+  import { composeWithIurefficient, iureConfigured, iureLoggedIn, pollCompose } from "../lib/state.svelte";
+  import type { IureBlueprint } from "../lib/api";
+
+  let blueprints = $state<IureBlueprint[] | null>(null);
+  let loadingBlueprints = $state(false);
+  let blueprintError = $state("");
+  async function loadBlueprints() {
+    const doc = job.iure?.documents?.find((d) => d.isTranscript) ?? job.iure?.documents?.[0];
+    if (!doc) return;
+    loadingBlueprints = true;
+    blueprintError = "";
+    try {
+      const o = await api.iureAiOptions(doc.id);
+      if (!o.canGenerate) blueprintError = o.reason === "no_text" ? "La instancia todavía no ha extraído el texto del documento; inténtalo en unos segundos." : "No se puede generar a partir de ese documento.";
+      blueprints = o.blueprints;
+    } catch (e) {
+      blueprintError = String(e);
+    } finally {
+      loadingBlueprints = false;
+    }
+  }
+  $effect(() => {
+    // Reanuda el seguimiento de una generación en curso tras reiniciar.
+    const c = job.iure?.composed;
+    if (c && c.state !== "SUCCESS" && c.state !== "FAILURE" && !c.error) pollCompose(job);
+  });
 
   let { job }: { job: Job } = $props();
   let showPicker = $state(false);
@@ -88,7 +113,7 @@
         {/each}
         <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
         <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
-        {#if iureConfigured()}
+        {#if iureConfigured() || iureLoggedIn()}
           <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? `Guardado en ${job.iure.folder} · volver a subir` : "Subir transcripción, resumen y minuta a un proyecto de Iurefficient"} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>
             <Icon name="upload" size={14} /> {job.iure ? "Guardado en Iurefficient" : "Guardar en Iurefficient"}
           </button>
@@ -149,6 +174,48 @@
     {@const kind = tab}
     {@const doc = kind === "summary" ? job.summary : job.minutes}
     <div class="body scroll">
+      {#if kind === "minutes" && job.result && iureLoggedIn()}
+        <div class="engine card-inner">
+          <div class="engine-head">
+            <span class="label"><Icon name="cloud" size={14} /> Minuta con el motor de Iurefficient</span>
+            {#if job.iure?.composed}
+              {@const c = job.iure.composed}
+              {#if c.state === "SUCCESS"}
+                <span class="pill success"><Icon name="check" size={11} stroke={3} /> {c.blueprintName} generada</span>
+                {#if c.link}<button class="btn sm" onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Abrir en Iurefficient</button>{/if}
+              {:else if c.error}
+                <span class="pill danger">Error: {c.error}</span>
+              {:else}
+                <span class="pill accent"><span class="spin"><Icon name="loader" size={11} /></span> {c.section ? `Sección ${c.current} de ${c.total}: ${c.section}` : "Generando…"}</span>
+              {/if}
+            {/if}
+          </div>
+          {#if !job.iure?.documents?.length}
+            <p class="hint">Guarda primero la transcripción en un proyecto de Iurefficient (botón «Guardar en Iurefficient») y aquí podrás generarla con el formato del despacho, sin llave de OpenRouter.</p>
+          {:else if !job.iure.composed || job.iure.composed.error || job.iure.composed.state === "SUCCESS"}
+            {#if blueprints === null}
+              <button class="btn sm" onclick={loadBlueprints} disabled={loadingBlueprints}>
+                {#if loadingBlueprints}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="sparkles" size={13} />{/if} {job.iure.composed ? "Generar de nuevo" : "Elegir formato y generar"}
+              </button>
+            {:else}
+              {#if blueprintError}<p class="hint errtxt">{blueprintError}</p>{/if}
+              {#if blueprints.length}
+                <div class="bps">
+                  {#each blueprints as b (b.id)}
+                    <button class="bp" class:suggested={b.suggested} onclick={() => composeWithIurefficient(job, b.id, b.name)} disabled={!!blueprintError}>
+                      <strong>{b.name}</strong>{b.suggested ? " · sugerido" : ""}
+                      <span class="hint">{b.description || `${b.genre} · ${b.sectionCount} secciones`}</span>
+                    </button>
+                  {/each}
+                </div>
+              {:else if !blueprintError}
+                <p class="hint">La instancia no tiene formatos (blueprints) publicados para generar documentos.</p>
+              {/if}
+              <button class="btn sm ghost" onclick={loadBlueprints} disabled={loadingBlueprints}><Icon name="refresh" size={13} /> Actualizar</button>
+            {/if}
+          {/if}
+        </div>
+      {/if}
       {#if doc.status === "done" && doc.content}
         <div class="docbar">
           <span class="hint" title={doc.path}>Guardado en {doc.path}{filled ? " · con detalles de la reunión" : ""}</span>
@@ -199,6 +266,15 @@
   .chev { margin-left: auto; display: inline-flex; transition: transform 0.15s; }
   .chev.up { transform: rotate(180deg); }
   .meta-body { padding: 4px 18px 14px; }
+  .engine { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+  .engine-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .engine .label { display: inline-flex; align-items: center; gap: 6px; }
+  .errtxt { color: var(--danger); }
+  .bps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+  .bp { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); text-align: left; }
+  .bp:hover:not(:disabled) { border-color: var(--accent); }
+  .bp.suggested { border-color: var(--accent); }
+  .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .meta-toggle .summary { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
   .hint.ok { color: var(--success); display: inline-flex; align-items: center; gap: 5px; }
   .link { color: var(--accent); text-decoration: underline; font-weight: 550; }

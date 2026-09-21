@@ -6,7 +6,7 @@ mod settings;
 mod subtitles;
 mod transcribe;
 
-use iurefficient_connect::{secrets, webdav::WebDav, Account};
+use iurefficient_connect::{api, rest::{Login, Session, SessionExport}, secrets, webdav::{self, WebDav}, Account};
 use models::{Downloads, ModelInfo};
 use recorder::Recorder;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ pub struct AppState {
     downloads: Arc<Downloads>,
     engine: Arc<Engine>,
     jobs: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Sesión REST de Iurefficient (se restaura del llavero al primer uso).
+    iure_session: tokio::sync::Mutex<Option<Arc<Session>>>,
 }
 
 #[derive(Serialize)]
@@ -582,6 +584,271 @@ async fn iure_upload(app: AppHandle, state: State<'_, AppState>, request: IureUp
     Ok(IureUploadResult { folder: request.folder, web_url: dav.acc.web_url(), uploaded })
 }
 
+// ---------------------------------------------------------------------------
+// Iurefficient (fase 1): sesión REST, proyectos, minutas con el motor, CRM, horas
+// ---------------------------------------------------------------------------
+fn iure_account(state: &AppState) -> Result<Account, String> {
+    let s = state.settings.lock().unwrap().clone();
+    Account::new(&s.iure_domain, &s.iure_email).map_err(|e| e.to_string())
+}
+
+fn persist_session(acc: &Account, sess: &Session) {
+    if let Ok(json) = serde_json::to_string(&sess.export()) {
+        let _ = secrets::guardar(acc, secrets::Kind::Session, &json);
+    }
+}
+
+/// Sesión REST viva: la cacheada, o la restaurada del llavero.
+async fn iure_session(state: &AppState) -> Result<Arc<Session>, String> {
+    if let Some(s) = state.iure_session.lock().await.as_ref() {
+        return Ok(s.clone());
+    }
+    let acc = iure_account(state)?;
+    let saved = secrets::leer(&acc, secrets::Kind::Session)
+        .ok()
+        .flatten()
+        .and_then(|j| serde_json::from_str::<SessionExport>(&j).ok())
+        .ok_or_else(|| "Inicia sesión en Iurefficient desde Ajustes".to_string())?;
+    let sess = Session::new(acc.clone(), &iure_user_agent()).map_err(|e| e.to_string())?;
+    sess.import(&saved).await.map_err(|e| format!("{e:#}"))?;
+    persist_session(&acc, &sess);
+    let sess = Arc::new(sess);
+    *state.iure_session.lock().await = Some(sess.clone());
+    Ok(sess)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureLoginResult {
+    logged_in: bool,
+    requires_totp: bool,
+    totp_token: Option<String>,
+    name: Option<String>,
+}
+
+#[tauri::command]
+async fn iure_login(state: State<'_, AppState>, password: String, totp_code: Option<String>, totp_token: Option<String>) -> Result<IureLoginResult, String> {
+    let acc = iure_account(&state)?;
+    let sess = Session::new(acc.clone(), &iure_user_agent()).map_err(|e| e.to_string())?;
+    let user = match (totp_token, totp_code) {
+        (Some(t), Some(code)) if !t.is_empty() => sess.verify_totp(&t, &code).await.map_err(|e| format!("{e:#}"))?,
+        _ => match sess.login(&password).await.map_err(|e| format!("{e:#}"))? {
+            Login::Ok(u) => u,
+            Login::TotpRequired { totp_token } => {
+                return Ok(IureLoginResult { logged_in: false, requires_totp: true, totp_token: Some(totp_token), name: None });
+            }
+        },
+    };
+    persist_session(&acc, &sess);
+    *state.iure_session.lock().await = Some(Arc::new(sess));
+    let name = user.name.clone().or_else(|| user.extra.get("full_name").and_then(|v| v.as_str()).map(str::to_string)).or(Some(user.email.clone()));
+    Ok(IureLoginResult { logged_in: true, requires_totp: false, totp_token: None, name })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureSessionStatus {
+    logged_in: bool,
+    name: Option<String>,
+    email: Option<String>,
+    crm: bool,
+    terminology: Option<api::Terminology>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn iure_session_status(state: State<'_, AppState>) -> Result<IureSessionStatus, String> {
+    let sess = match iure_session(&state).await {
+        Ok(s) => s,
+        Err(e) => return Ok(IureSessionStatus { logged_in: false, name: None, email: None, crm: false, terminology: None, error: Some(e) }),
+    };
+    match sess.me().await {
+        Ok(u) => {
+            let crm = api::crm_available(&sess).await.unwrap_or(false);
+            let terminology = api::terminology(&sess).await.ok();
+            let name = u.name.clone().or_else(|| u.extra.get("full_name").and_then(|v| v.as_str()).map(str::to_string));
+            Ok(IureSessionStatus { logged_in: true, name, email: Some(u.email), crm, terminology, error: None })
+        }
+        Err(e) => {
+            *state.iure_session.lock().await = None;
+            Ok(IureSessionStatus { logged_in: false, name: None, email: None, crm: false, terminology: None, error: Some(format!("{e:#}")) })
+        }
+    }
+}
+
+#[tauri::command]
+async fn iure_logout(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(s) = state.iure_session.lock().await.take() {
+        let _ = s.logout().await;
+    }
+    if let Ok(acc) = iure_account(&state) {
+        let _ = secrets::borrar(&acc, secrets::Kind::Session);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn iure_search_cases(state: State<'_, AppState>, query: String) -> Result<Vec<api::CaseSummary>, String> {
+    let sess = iure_session(&state).await?;
+    api::cases(&sess, Some(&query), 50).await.map_err(|e| format!("{e:#}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureCaseUploadRequest {
+    job_id: String,
+    case_id: String,
+    files: Vec<String>,
+    /// Ruta local de la transcripción (para marcarla como fuente de la minuta).
+    transcript_path: Option<String>,
+    /// Horas a registrar en el proyecto (None = no registrar).
+    hours: Option<f64>,
+    hours_description: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct IureDocRef {
+    id: String,
+    file_name: String,
+    is_transcript: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureCaseUploadResult {
+    documents: Vec<IureDocRef>,
+    time_entry_id: Option<String>,
+    web_url: String,
+}
+
+fn remote_name_for(local: &Path) -> Option<String> {
+    let name = local.file_name()?.to_string_lossy().into_owned();
+    Some(webdav::fallback_name(&name).unwrap_or(name))
+}
+
+#[tauri::command]
+async fn iure_upload_to_case(app: AppHandle, state: State<'_, AppState>, request: IureCaseUploadRequest) -> Result<IureCaseUploadResult, String> {
+    let sess = iure_session(&state).await?;
+    let total_files = request.files.len();
+    let mut documents = Vec::new();
+    for (index, f) in request.files.iter().enumerate() {
+        let local = PathBuf::from(f);
+        let file_name = remote_name_for(&local).unwrap_or_default();
+        let _ = app.emit("iure-upload-progress", IureUploadProgress { job_id: request.job_id.clone(), file_name: file_name.clone(), index, total_files, sent: 0, total: 0 });
+        let is_transcript = request.transcript_path.as_deref() == Some(f.as_str());
+        let opts = api::UploadOptions {
+            case_id: Some(request.case_id.clone()),
+            file_name: Some(file_name.clone()),
+            document_type: Some(if is_transcript { "transcript".into() } else { "other".into() }),
+            tags: vec!["iuretranscribe".into()],
+            ..Default::default()
+        };
+        let doc = api::upload_document(&sess, &local, &opts).await.map_err(|e| format!("{file_name}: {e:#}"))?;
+        documents.push(IureDocRef { id: doc.id, file_name, is_transcript });
+    }
+    let time_entry_id = match request.hours {
+        Some(h) if h > 0.0 => Some(
+            api::add_time_entry(&sess, &request.case_id, h, request.hours_description.as_deref().unwrap_or("Reunión transcrita con IureTranscribe"), true, None)
+                .await
+                .map_err(|e| format!("Documentos subidos, pero no se registraron las horas: {e:#}"))?,
+        ),
+        _ => None,
+    };
+    Ok(IureCaseUploadResult { documents, time_entry_id, web_url: sess.account().web_url() })
+}
+
+#[tauri::command]
+async fn iure_ai_options(state: State<'_, AppState>, document_id: String) -> Result<api::AiOptions, String> {
+    let sess = iure_session(&state).await?;
+    api::ai_options(&sess, &document_id).await.map_err(|e| format!("{e:#}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureComposeRequest {
+    blueprint_id: String,
+    case_id: Option<String>,
+    source_document_ids: Vec<String>,
+    title: Option<String>,
+    attendees: Vec<String>,
+    extra_instructions: Option<String>,
+}
+
+#[tauri::command]
+async fn iure_compose(state: State<'_, AppState>, request: IureComposeRequest) -> Result<String, String> {
+    let sess = iure_session(&state).await?;
+    let req = api::ComposeRequest {
+        case_id: request.case_id,
+        source_document_ids: request.source_document_ids,
+        title: request.title,
+        extra_instructions: request.extra_instructions,
+        attendees: request.attendees,
+        ..Default::default()
+    };
+    api::compose(&sess, &request.blueprint_id, &req).await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn iure_compose_status(state: State<'_, AppState>, task_id: String) -> Result<api::ComposeStatus, String> {
+    let sess = iure_session(&state).await?;
+    api::compose_status(&sess, &task_id).await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn iure_crm_search(state: State<'_, AppState>, kind: String, query: String) -> Result<Vec<api::CrmItem>, String> {
+    let sess = iure_session(&state).await?;
+    let k = if kind == "lead" { api::CrmKind::Lead } else { api::CrmKind::Opportunity };
+    api::crm_list(&sess, k, Some(&query), 100).await.map_err(|e| format!("{e:#}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureCrmUploadRequest {
+    job_id: String,
+    kind: String,
+    id: String,
+    files: Vec<String>,
+    activity_subject: Option<String>,
+    activity_description: Option<String>,
+    duration_minutes: Option<u32>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureCrmUploadResult {
+    documents: Vec<IureDocRef>,
+    activity_id: Option<String>,
+    web_url: String,
+}
+
+#[tauri::command]
+async fn iure_upload_to_crm(app: AppHandle, state: State<'_, AppState>, request: IureCrmUploadRequest) -> Result<IureCrmUploadResult, String> {
+    let sess = iure_session(&state).await?;
+    let kind = if request.kind == "lead" { api::CrmKind::Lead } else { api::CrmKind::Opportunity };
+    let total_files = request.files.len();
+    let mut documents = Vec::new();
+    for (index, f) in request.files.iter().enumerate() {
+        let local = PathBuf::from(f);
+        let file_name = remote_name_for(&local).unwrap_or_default();
+        let _ = app.emit("iure-upload-progress", IureUploadProgress { job_id: request.job_id.clone(), file_name: file_name.clone(), index, total_files, sent: 0, total: 0 });
+        let doc = api::crm_attach_file(&sess, kind, &request.id, &local, Some(&file_name)).await.map_err(|e| format!("{file_name}: {e:#}"))?;
+        documents.push(IureDocRef { id: doc.id, file_name, is_transcript: false });
+    }
+    let activity_id = match request.activity_subject {
+        Some(subject) if !subject.trim().is_empty() => {
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            Some(
+                api::crm_activity(&sess, kind, &request.id, "meeting", &subject, request.activity_description.as_deref(), request.duration_minutes, Some(&now))
+                    .await
+                    .map_err(|e| format!("Archivos adjuntados, pero no se registró la actividad: {e:#}"))?,
+            )
+        }
+        _ => None,
+    };
+    Ok(IureCrmUploadResult { documents, activity_id, web_url: sess.account().web_url() })
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -631,6 +898,7 @@ pub fn run() {
                 downloads: Arc::new(Downloads::default()),
                 engine: Arc::new(Engine::default()),
                 jobs: Mutex::new(HashMap::new()),
+                iure_session: tokio::sync::Mutex::new(None),
             });
             Ok(())
         })
@@ -654,6 +922,16 @@ pub fn run() {
             iure_test_connection,
             iure_list,
             iure_upload,
+            iure_login,
+            iure_session_status,
+            iure_logout,
+            iure_search_cases,
+            iure_upload_to_case,
+            iure_ai_options,
+            iure_compose,
+            iure_compose_status,
+            iure_crm_search,
+            iure_upload_to_crm,
             list_audio_devices,
             start_recording,
             stop_recording,

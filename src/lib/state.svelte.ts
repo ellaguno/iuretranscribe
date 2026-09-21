@@ -2,6 +2,9 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
+  type IureCrmKind,
+  type IureDocRef,
+  type IureSessionStatus,
   type IureUploadProgress,
   type DeviceList,
   type DocKind,
@@ -68,12 +71,21 @@ export function metaFilled(m: JobMeta): boolean {
   return !!(m.date.trim() || m.place.trim() || m.participants.trim() || m.notes.trim());
 }
 
-/** Resultado de guardar un trabajo en Iurefficient. */
+/** Resultado de guardar un trabajo en Iurefficient (carpeta WebDAV, proyecto o CRM). */
 export interface IureSaved {
+  /** Carpeta WebDAV, o etiqueta del destino (p. ej. «Proyecto EXP-001 · Cliente»). */
   folder: string;
   webUrl: string;
   files: string[];
   savedAt: number;
+  mode?: "webdav" | "case" | "crm";
+  caseId?: string;
+  caseTitle?: string;
+  documents?: IureDocRef[];
+  crm?: { kind: IureCrmKind; id: string; name: string; activityId: string | null };
+  timeEntryId?: string | null;
+  /** Documento generado con el motor de Iurefficient (minuta). */
+  composed?: { taskId: string; blueprintName: string; documentId: string | null; link: string | null; state: string; section: string | null; current: number; total: number; error: string | null };
 }
 
 export interface Job {
@@ -127,6 +139,8 @@ export const app = $state({
   recordingBusy: false,
   /** Detalles capturados durante la grabación; se adjuntan al trabajo al detenerla. */
   pendingMeta: { participants: "", date: "", place: "", notes: "" } as JobMeta,
+  /** Sesión REST con Iurefficient (null = no comprobada todavía). */
+  iureSession: null as IureSessionStatus | null,
 });
 
 let toastSeq = 0;
@@ -225,6 +239,7 @@ export async function init() {
   applyTheme();
   await restoreJobs();
   startPersistence();
+  refreshIureSession();
   pollRecording().then(() => {
     if (app.recording.active && !pollTimer) pollTimer = setInterval(pollRecording, 250);
   });
@@ -513,6 +528,149 @@ async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number
     toast(`No se pudo guardar la transcripción en vivo: ${e}. Se transcribirá de nuevo.`, "error", 8000);
     await startQueue();
   }
+}
+
+/** Comprueba (sin bloquear) si hay sesión REST válida con la instancia. */
+export async function refreshIureSession() {
+  if (!iureConfigured()) {
+    app.iureSession = { loggedIn: false, name: null, email: null, crm: false, terminology: null, error: null };
+    return;
+  }
+  try {
+    app.iureSession = await api.iureSessionStatus();
+  } catch (e) {
+    app.iureSession = { loggedIn: false, name: null, email: null, crm: false, terminology: null, error: String(e) };
+  }
+}
+
+export function iureLoggedIn(): boolean {
+  return !!app.iureSession?.loggedIn;
+}
+
+/** Etiquetas de la instancia («proyecto»/«caso», «cliente»/«paciente»), capitalizadas. */
+export function term(key: "case" | "cases" | "client" | "clients"): string {
+  const t = app.iureSession?.terminology;
+  const v = t?.[key] || { case: "proyecto", cases: "proyectos", client: "cliente", clients: "clientes" }[key];
+  return v.charAt(0).toUpperCase() + v.slice(1);
+}
+
+/** Horas de la reunión redondeadas a cuartos, a partir de la duración del audio. */
+export function suggestedHours(job: Job): number {
+  const secs = job.result?.audioSecs ?? job.durationSecs ?? 0;
+  return Math.max(0.25, Math.round((secs / 3600) * 4) / 4);
+}
+
+export async function saveToCase(job: Job, caseId: string, caseTitle: string, includeMedia: boolean, hours: number | null): Promise<boolean> {
+  const files = iureFilesFor(job, includeMedia);
+  if (!files.length) {
+    toast("No hay archivos que subir todavía", "error");
+    return false;
+  }
+  job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
+  try {
+    const transcriptPath = job.result?.outputs.find((o) => o.format === "txt")?.path ?? job.result?.outputs.find((o) => o.format === "srt")?.path ?? null;
+    const res = await api.iureUploadToCase({ jobId: job.id, caseId, files, transcriptPath, hours, hoursDescription: hours ? `Reunión: ${job.name}` : null });
+    job.iure = { mode: "case", folder: caseTitle, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), caseId, caseTitle, documents: res.documents, timeEntryId: res.timeEntryId };
+    toast(`Guardado en ${caseTitle} (${res.documents.length} documento(s)${res.timeEntryId ? ", horas registradas" : ""})`, "success", 6000);
+    return true;
+  } catch (e) {
+    toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);
+    return false;
+  } finally {
+    job.iureUpload = null;
+  }
+}
+
+export async function saveToCrm(job: Job, kind: IureCrmKind, id: string, name: string, includeMedia: boolean, withActivity: boolean): Promise<boolean> {
+  const files = iureFilesFor(job, includeMedia);
+  if (!files.length) {
+    toast("No hay archivos que subir todavía", "error");
+    return false;
+  }
+  job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
+  try {
+    const minutes = Math.max(1, Math.round((job.result?.audioSecs ?? job.durationSecs ?? 0) / 60));
+    const description = job.summary.status === "done" && job.summary.content ? job.summary.content : job.result?.text.slice(0, 2000) ?? null;
+    const res = await api.iureUploadToCrm({
+      jobId: job.id,
+      kind,
+      id,
+      files,
+      activitySubject: withActivity ? `Reunión: ${job.name.replace(/\.[^.]+$/, "")}` : null,
+      activityDescription: withActivity ? description : null,
+      durationMinutes: withActivity ? minutes : null,
+    });
+    const label = `${kind === "lead" ? "Lead" : "Oportunidad"} · ${name}`;
+    job.iure = { mode: "crm", folder: label, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), documents: res.documents, crm: { kind, id, name, activityId: res.activityId } };
+    toast(`Adjuntado a ${label}${res.activityId ? " y actividad registrada" : ""}`, "success", 6000);
+    return true;
+  } catch (e) {
+    toast(`No se pudo guardar en el CRM: ${e}`, "error", 9000);
+    return false;
+  } finally {
+    job.iureUpload = null;
+  }
+}
+
+let composePoll: ReturnType<typeof setInterval> | undefined;
+
+/** Genera un documento (minuta) con el motor de Iurefficient a partir de la transcripción subida. */
+export async function composeWithIurefficient(job: Job, blueprintId: string, blueprintName: string) {
+  const transcript = job.iure?.documents?.find((d) => d.isTranscript) ?? job.iure?.documents?.[0];
+  if (!job.iure || !transcript) {
+    toast("Primero guarda la transcripción en un proyecto de Iurefficient", "error");
+    return;
+  }
+  const attendees = job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean);
+  try {
+    const taskId = await api.iureCompose({
+      blueprintId,
+      caseId: job.iure.caseId ?? null,
+      sourceDocumentIds: [transcript.id],
+      title: `${blueprintName} · ${job.name.replace(/\.[^.]+$/, "")}`,
+      attendees,
+      extraInstructions: metaToContext(job.meta) || null,
+    });
+    job.iure.composed = { taskId, blueprintName, documentId: null, link: null, state: "PENDING", section: null, current: 0, total: 0, error: null };
+    pollCompose(job);
+  } catch (e) {
+    toast(`No se pudo iniciar la generación: ${e}`, "error", 9000);
+  }
+}
+
+export function pollCompose(job: Job) {
+  if (composePoll) clearInterval(composePoll);
+  const tick = async () => {
+    const c = job.iure?.composed;
+    if (!c || !job.iure) return stopComposePoll();
+    try {
+      const st = await api.iureComposeStatus(c.taskId);
+      c.state = st.state;
+      c.section = st.section;
+      c.current = st.current;
+      c.total = st.total;
+      if (st.state === "SUCCESS") {
+        c.documentId = st.documentId;
+        c.link = st.link ? (st.link.startsWith("http") ? st.link : job.iure.webUrl.replace(/\/$/, "") + st.link) : null;
+        toast(`${c.blueprintName} generada en Iurefficient`, "success", 7000);
+        stopComposePoll();
+      } else if (st.state === "FAILURE" || st.state === "REVOKED") {
+        c.error = st.error ?? "La generación falló";
+        toast(`Iurefficient no pudo generar el documento: ${c.error}`, "error", 9000);
+        stopComposePoll();
+      }
+    } catch (e) {
+      c.error = String(e);
+      stopComposePoll();
+    }
+  };
+  tick();
+  composePoll = setInterval(tick, 3000);
+}
+
+function stopComposePoll() {
+  if (composePoll) clearInterval(composePoll);
+  composePoll = undefined;
 }
 
 export function iureConfigured(): boolean {

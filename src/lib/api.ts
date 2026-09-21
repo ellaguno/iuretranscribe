@@ -64,6 +64,97 @@ export interface IureUploadResult {
   uploaded: IureUploaded[];
 }
 
+export interface IureLoginResult {
+  loggedIn: boolean;
+  requiresTotp: boolean;
+  totpToken: string | null;
+  name: string | null;
+}
+
+export interface IureTerminology {
+  case: string;
+  cases: string;
+  client: string;
+  clients: string;
+  specialty: string | null;
+}
+
+export interface IureSessionStatus {
+  loggedIn: boolean;
+  name: string | null;
+  email: string | null;
+  crm: boolean;
+  terminology: IureTerminology | null;
+  error: string | null;
+}
+
+export interface IureCase {
+  id: string;
+  caseNumber: string;
+  title: string;
+  status: string;
+  clientName: string | null;
+  clientId: string | null;
+}
+
+export interface IureDocRef {
+  id: string;
+  fileName: string;
+  isTranscript: boolean;
+}
+
+export interface IureCaseUploadResult {
+  documents: IureDocRef[];
+  timeEntryId: string | null;
+  webUrl: string;
+}
+
+export interface IureBlueprint {
+  id: string;
+  name: string;
+  description: string;
+  genre: string;
+  sectionCount: number;
+  hasDesign: boolean;
+  suggested: boolean;
+}
+
+export interface IureAiOptions {
+  canGenerate: boolean;
+  reason: string | null;
+  isTranscript: boolean;
+  composing: boolean;
+  blueprints: IureBlueprint[];
+}
+
+export interface IureComposeStatus {
+  state: string;
+  current: number;
+  total: number;
+  section: string | null;
+  documentId: string | null;
+  link: string | null;
+  error: string | null;
+}
+
+export type IureCrmKind = "lead" | "opportunity";
+
+export interface IureCrmItem {
+  kind: IureCrmKind;
+  id: string;
+  name: string;
+  organization: string | null;
+  status: string | null;
+  stage: string | null;
+  amount: number | null;
+}
+
+export interface IureCrmUploadResult {
+  documents: IureDocRef[];
+  activityId: string | null;
+  webUrl: string;
+}
+
 export interface IureUploadProgress {
   jobId: string;
   fileName: string;
@@ -197,6 +288,20 @@ export const api = {
   iureList: (folder: string) => invoke<IureListing>("iure_list", { folder }),
   iureUpload: (jobId: string, folder: string, files: string[]) =>
     invoke<IureUploadResult>("iure_upload", { request: { jobId, folder, files } }),
+  iureLogin: (password: string, totpCode?: string, totpToken?: string) =>
+    invoke<IureLoginResult>("iure_login", { password, totpCode: totpCode ?? null, totpToken: totpToken ?? null }),
+  iureSessionStatus: () => invoke<IureSessionStatus>("iure_session_status"),
+  iureLogout: () => invoke<void>("iure_logout"),
+  iureSearchCases: (query: string) => invoke<IureCase[]>("iure_search_cases", { query }),
+  iureUploadToCase: (req: { jobId: string; caseId: string; files: string[]; transcriptPath: string | null; hours: number | null; hoursDescription: string | null }) =>
+    invoke<IureCaseUploadResult>("iure_upload_to_case", { request: req }),
+  iureAiOptions: (documentId: string) => invoke<IureAiOptions>("iure_ai_options", { documentId }),
+  iureCompose: (req: { blueprintId: string; caseId: string | null; sourceDocumentIds: string[]; title: string | null; attendees: string[]; extraInstructions: string | null }) =>
+    invoke<string>("iure_compose", { request: req }),
+  iureComposeStatus: (taskId: string) => invoke<IureComposeStatus>("iure_compose_status", { taskId }),
+  iureCrmSearch: (kind: IureCrmKind, query: string) => invoke<IureCrmItem[]>("iure_crm_search", { kind, query }),
+  iureUploadToCrm: (req: { jobId: string; kind: IureCrmKind; id: string; files: string[]; activitySubject: string | null; activityDescription: string | null; durationMinutes: number | null }) =>
+    invoke<IureCrmUploadResult>("iure_upload_to_crm", { request: req }),
   listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
   startRecording: () => invoke<StartRecordingInfo>("start_recording"),
   stopRecording: () => invoke<RecordingResult>("stop_recording"),

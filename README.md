@@ -33,13 +33,21 @@ video original. Un archivo con el mismo nombre se guarda como versión nueva, no
 duplicado, igual que en la aplicación web. Las instancias no admiten `.srt`/`.vtt`
 por defecto: en ese caso se suben como `.txt` (p. ej. `reunion.srt.txt`).
 
-Esta es la fase 0 de la integración, que no requiere cambios en el servidor. El
-conector es el crate común [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect),
-compartido con IureEditor e IureDav; la contraseña de aplicación se guarda en el
-llavero del sistema (la misma entrada que usa IureDav), no en el archivo de ajustes.
-Las siguientes fases (resumen y minuta con el motor de Iurefficient, adjuntar a una
-oportunidad o lead del CRM, registrar horas) necesitan una llave de aplicación para
-la API REST de la instancia.
+Además, con **sesión iniciada** (tu contraseña normal de Iurefficient, con verificación
+en dos pasos si la tienes; la sesión se guarda en el llavero y dura 30 días) el mismo
+botón ofrece dos destinos más:
+
+- **Proyecto**: busca el proyecto o caso, sube los archivos como documentos del
+  expediente y, si quieres, registra las horas de la reunión como tiempo facturable.
+  Después, en la pestaña Minuta, «Minuta con el motor de Iurefficient» lista los
+  formatos (blueprints) del despacho y genera el documento en la instancia, con los
+  asistentes y detalles capturados, sin necesidad de llave de OpenRouter.
+- **CRM**: adjunta los archivos a una oportunidad o lead y registra una actividad
+  de reunión con la duración y el resumen.
+
+El conector es el crate común [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect),
+compartido con IureEditor e IureDav; las credenciales viven en el llavero del sistema
+(la misma entrada de contraseña WebDAV que usa IureDav), no en el archivo de ajustes.
 
 ## Grabación
 
