@@ -179,11 +179,18 @@ jobs:
           projectPath: .
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}
 
-      # Renombra los instaladores con la variante para que no choquen entre sí en la release.
+      # Renombra los instaladores con la variante para que no choquen entre sí en la
+      # release. GitHub lista los assets por nombre (orden ASCII), así que el prefijo
+      # numérico deja primero Windows, luego macOS y al final Linux.
       - name: Renombrar instaladores
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          case "${{ matrix.name }}" in
+            windows-*) ORDEN=1 ;;
+            macos-*)   ORDEN=2 ;;
+            *)         ORDEN=3 ;;
+          esac
           mkdir -p dist-release
           # bash 3.2 de macOS no tiene globstar: se usa find.
           find "${CARGO_TARGET_DIR:-src-tauri/target}" -path '*/release/bundle/*' -type f \
@@ -198,7 +205,7 @@ jobs:
               *-setup.exe.sig)  ext="exe.sig" ;;
               *)                ext="${base##*.}" ;;
             esac
-            cp "$f" "dist-release/IureTranscribe_${VERSION}_${{ matrix.name }}.${ext}"
+            cp "$f" "dist-release/IureTranscribe_${VERSION}_${ORDEN}-${{ matrix.name }}.${ext}"
           done
           ls -la dist-release
 
@@ -237,7 +244,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 - <<'PY'
-          import json, os, glob, datetime
+          import json, os, glob, datetime, re
           tag = os.environ["GITHUB_REF_NAME"]; version = tag.lstrip("v")
           base = f"https://github.com/ellaguno/iuretranscribe/releases/download/{tag}/"
           # nombre de variante en los archivos → clave del actualizador (os-arch[-variante])
@@ -252,7 +259,8 @@ jobs:
               asset = name[:-4]  # sin .sig
               variant = None
               for v in targets:
-                  if asset.startswith(f"IureTranscribe_{version}_{v}."):
+                  # IureTranscribe_<versión>_<orden>-<variante>.<ext>
+                  if re.match(rf"IureTranscribe_{re.escape(version)}_\d-{re.escape(v)}\.", asset):
                       variant = v
               if not variant:
                   continue
