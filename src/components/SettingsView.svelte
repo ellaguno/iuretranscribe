@@ -101,6 +101,72 @@
 </header>
 
 <div class="content scroll">
+  <section class="card iure" id="iurefficient">
+    <div class="iure-head">
+      <h2><Icon name="cloud" size={17} /> Cuenta de Iurefficient</h2>
+      {#if app.iureSession?.loggedIn}
+        <span class="pill success"><Icon name="check" size={12} stroke={3} /> Conectado como {app.iureSession.name ?? app.iureSession.email}{app.iureSession.crm ? " · CRM" : ""}</span>
+      {:else}
+        <span class="pill">No conectado</span>
+      {/if}
+    </div>
+    <p class="hint">Conecta tu cuenta para guardar la transcripción, el resumen y la minuta directo en un {app.iureSession?.terminology?.case ?? "proyecto"}, generar la minuta con el motor de Iurefficient (sin llave de OpenRouter), adjuntar a una oportunidad o lead del CRM y registrar horas. La contraseña no se guarda: sólo la sesión, en el llavero del sistema, y dura 30 días.</p>
+    <div class="grid2">
+      <div class="field">
+        <label for="iure-domain">Dominio de la instancia</label>
+        <input id="iure-domain" class="input" placeholder="p. ej. 2.ds.iurefficient.com" value={s.iureDomain} oninput={(e) => debounced({ iureDomain: (e.target as HTMLInputElement).value.trim() })} spellcheck="false" disabled={app.iureSession?.loggedIn} />
+      </div>
+      <div class="field">
+        <label for="iure-email">Correo de usuario</label>
+        <input id="iure-email" class="input" type="email" placeholder="tu@despacho.com" value={s.iureEmail} oninput={(e) => debounced({ iureEmail: (e.target as HTMLInputElement).value.trim() })} spellcheck="false" disabled={app.iureSession?.loggedIn} />
+      </div>
+    </div>
+    {#if app.iureSession?.loggedIn}
+      <div class="row"><button class="btn sm ghost" onclick={logout}><Icon name="x" size={14} /> Cerrar sesión</button></div>
+    {:else}
+      <div class="row">
+        {#if totpToken}
+          <input class="input login-input" placeholder="Código de verificación (6 dígitos)" bind:value={loginTotp} inputmode="numeric" autocomplete="one-time-code" onkeydown={(e) => e.key === "Enter" && login()} />
+        {:else}
+          <input class="input login-input" type="password" placeholder="Contraseña de Iurefficient" bind:value={loginPassword} autocomplete="current-password" onkeydown={(e) => e.key === "Enter" && login()} />
+        {/if}
+        <button class="btn primary" onclick={login} disabled={loggingIn || !s.iureDomain || !s.iureEmail || (totpToken ? loginTotp.length < 6 : !loginPassword)}>
+          {#if loggingIn}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="key" size={15} />{/if} {totpToken ? "Verificar" : "Conectar"}
+        </button>
+      </div>
+      {#if app.iureSession?.error && s.iureDomain && s.iureEmail}<p class="hint errmsg">{app.iureSession.error}</p>{/if}
+    {/if}
+
+    <details class="advanced">
+      <summary>Opciones avanzadas: acceso WebDAV (destino «Carpeta», compartido con IureDav)</summary>
+      <p class="hint">No hace falta con la sesión iniciada. Sirve para guardar en cualquier carpeta del árbol de documentos con una <strong>contraseña de aplicación</strong> (empieza con <code>iurdav_</code>) que generas en tu perfil de Iurefficient; requiere WebDAV activado por un administrador. Vacía el campo para eliminarla del llavero.</p>
+      <div class="grid2">
+        <div class="field">
+          <label for="iure-pass">Contraseña de aplicación WebDAV</label>
+          <div class="row">
+            <input id="iure-pass" class="input" type={showIurePass ? "text" : "password"} placeholder="iurdav_…" value={s.iureAppPassword} oninput={(e) => debounced({ iureAppPassword: (e.target as HTMLInputElement).value.trim() })} autocomplete="off" spellcheck="false" />
+            <button class="btn icon ghost" onclick={() => (showIurePass = !showIurePass)} title={showIurePass ? "Ocultar" : "Mostrar"}><Icon name={showIurePass ? "eyeOff" : "eye"} size={16} /></button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="switchrow">
+            <div>
+              <span class="label">Incluir el audio o video original</span>
+              <p class="hint">Al guardar, subir también la grabación además de los textos.</p>
+            </div>
+            <button class="switch" class:on={s.iureUploadMedia} aria-label="Incluir audio" onclick={() => saveSettings({ iureUploadMedia: !s.iureUploadMedia })}></button>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn sm" onclick={testIure} disabled={iureTesting || !s.iureDomain || !s.iureEmail || !s.iureAppPassword}>
+          {#if iureTesting}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="check" size={15} />{/if} Probar acceso WebDAV
+        </button>
+        {#if iureResult}<span class="hint" class:okmsg={iureResult.ok} class:errmsg={!iureResult.ok}>{iureResult.text}</span>{/if}
+      </div>
+    </details>
+  </section>
+
   <section class="card">
     <h2><Icon name="file" size={17} /> Salida</h2>
     <div class="grid2">
@@ -217,65 +283,6 @@
   </section>
 
   <section class="card">
-    <h2><Icon name="cloud" size={17} /> Cuenta de Iurefficient</h2>
-    <p class="hint">Con tu cuenta conectada puedes guardar la transcripción, el resumen y la minuta directo en la carpeta de un cliente o proyecto. Se usa el acceso WebDAV de la instancia con una <strong>contraseña de aplicación</strong> (empieza con <code>iurdav_</code>), que generas en tu perfil de Iurefficient; un administrador debe tener WebDAV activado.</p>
-    <div class="grid2">
-      <div class="field">
-        <label for="iure-domain">Dominio de la instancia</label>
-        <input id="iure-domain" class="input" placeholder="p. ej. 2.ds.iurefficient.com" value={s.iureDomain} oninput={(e) => debounced({ iureDomain: (e.target as HTMLInputElement).value.trim() })} spellcheck="false" />
-      </div>
-      <div class="field">
-        <label for="iure-email">Correo de usuario</label>
-        <input id="iure-email" class="input" type="email" placeholder="tu@despacho.com" value={s.iureEmail} oninput={(e) => debounced({ iureEmail: (e.target as HTMLInputElement).value.trim() })} spellcheck="false" />
-      </div>
-      <div class="field">
-        <label for="iure-pass">Contraseña de aplicación</label>
-        <div class="row">
-          <input id="iure-pass" class="input" type={showIurePass ? "text" : "password"} placeholder="iurdav_…" value={s.iureAppPassword} oninput={(e) => debounced({ iureAppPassword: (e.target as HTMLInputElement).value.trim() })} autocomplete="off" spellcheck="false" />
-          <button class="btn icon ghost" onclick={() => (showIurePass = !showIurePass)} title={showIurePass ? "Ocultar" : "Mostrar"}><Icon name={showIurePass ? "eyeOff" : "eye"} size={16} /></button>
-        </div>
-      </div>
-      <div class="field">
-        <div class="switchrow">
-          <div>
-            <span class="label">Incluir el audio o video original</span>
-            <p class="hint">Al guardar, subir también la grabación además de los textos.</p>
-          </div>
-          <button class="switch" class:on={s.iureUploadMedia} aria-label="Incluir audio" onclick={() => saveSettings({ iureUploadMedia: !s.iureUploadMedia })}></button>
-        </div>
-      </div>
-    </div>
-    <div class="login card-inner">
-      <h3>Sesión para proyectos, minutas y CRM</h3>
-      <p class="hint">Con la sesión iniciada (tu contraseña normal de Iurefficient, no la de aplicación) puedes guardar directo en un {app.iureSession?.terminology?.case ?? "proyecto"}, generar la minuta con el motor de Iurefficient, adjuntar a un lead u oportunidad y registrar horas. La contraseña no se guarda: sólo la sesión, en el llavero, y dura 30 días.</p>
-      {#if app.iureSession?.loggedIn}
-        <div class="row">
-          <span class="pill success"><Icon name="check" size={12} stroke={3} /> Sesión iniciada como {app.iureSession.name ?? app.iureSession.email}{app.iureSession.crm ? " · CRM disponible" : ""}</span>
-          <button class="btn sm ghost" onclick={logout}>Cerrar sesión</button>
-        </div>
-      {:else}
-        <div class="row">
-          {#if totpToken}
-            <input class="input" placeholder="Código de verificación (6 dígitos)" bind:value={loginTotp} inputmode="numeric" autocomplete="one-time-code" />
-          {:else}
-            <input class="input" type="password" placeholder="Contraseña de Iurefficient" bind:value={loginPassword} autocomplete="current-password" onkeydown={(e) => e.key === "Enter" && login()} />
-          {/if}
-          <button class="btn primary" onclick={login} disabled={loggingIn || !s.iureDomain || !s.iureEmail || (totpToken ? loginTotp.length < 6 : !loginPassword)}>
-            {#if loggingIn}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="key" size={15} />{/if} {totpToken ? "Verificar" : "Iniciar sesión"}
-          </button>
-        </div>
-        {#if app.iureSession?.error && s.iureDomain && s.iureEmail}<p class="hint errmsg">{app.iureSession.error}</p>{/if}
-      {/if}
-    </div>
-    <div class="row">
-      <button class="btn" onclick={testIure} disabled={iureTesting || !s.iureDomain || !s.iureEmail || !s.iureAppPassword}>
-        {#if iureTesting}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="check" size={15} />{/if} Probar conexión
-      </button>
-      {#if iureResult}<span class="hint" class:okmsg={iureResult.ok} class:errmsg={!iureResult.ok}>{iureResult.text}</span>{/if}
-    </div>
-  </section>
-
-  <section class="card">
     <h2><Icon name="sun" size={17} /> Apariencia</h2>
     <div class="seg">
       {#each [["system", "Sistema", "monitor"], ["light", "Claro", "sun"], ["dark", "Oscuro", "moon"]] as [id, label, icon]}
@@ -302,8 +309,11 @@
   .note { display: flex; gap: 6px; align-items: flex-start; }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .okmsg { color: var(--success); }
-  .login { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
-  .login .row .input { max-width: 340px; }
+  .iure { border-color: var(--accent); }
+  .iure-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .login-input { max-width: 340px; }
+  .advanced { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 12px; }
+  .advanced summary { cursor: pointer; color: var(--text-2); font-weight: 550; font-size: 13px; }
   .errmsg { color: var(--danger); }
   .seg { display: inline-flex; background: var(--surface-2); padding: 3px; border-radius: 10px; gap: 2px; width: fit-content; }
   .seg button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; color: var(--text-2); font-weight: 550; }

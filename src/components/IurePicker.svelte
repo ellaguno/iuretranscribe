@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type IureCase, type IureCrmItem, type IureCrmKind, type IureListing } from "../lib/api";
-  import { app, iureFilesFor, iureLoggedIn, saveSettings, saveToCase, saveToCrm, saveToIurefficient, suggestedHours, term, type Job } from "../lib/state.svelte";
+  import { app, iureConfigured, iureFilesFor, iureLoggedIn, saveSettings, saveToCase, saveToCrm, saveToIurefficient, suggestedHours, term, type Job } from "../lib/state.svelte";
   import { fmtBytes } from "../lib/format";
   import Icon from "./Icon.svelte";
 
@@ -128,7 +128,9 @@
     <div class="modes">
       <button class:active={mode === "case"} onclick={() => (mode = "case")} disabled={!iureLoggedIn()} title={iureLoggedIn() ? "" : "Inicia sesión en Ajustes"}><Icon name="layers" size={14} /> {term("case")}</button>
       <button class:active={mode === "crm"} onclick={() => (mode = "crm")} disabled={!iureLoggedIn() || !app.iureSession?.crm} title={app.iureSession?.crm ? "" : "El CRM no está disponible en tu instancia o sesión"}><Icon name="sparkles" size={14} /> CRM</button>
-      <button class:active={mode === "webdav"} onclick={() => (mode = "webdav")}><Icon name="folder" size={14} /> Carpeta</button>
+      {#if iureConfigured()}
+        <button class:active={mode === "webdav"} onclick={() => (mode = "webdav")}><Icon name="folder" size={14} /> Carpeta</button>
+      {/if}
     </div>
 
     {#if mode === "webdav"}

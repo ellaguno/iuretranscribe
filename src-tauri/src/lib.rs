@@ -152,11 +152,12 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), S
     let mut to_disk = settings.clone();
     // La contraseña WebDAV va al llavero del sistema (compartido con IureDav); en el
     // archivo sólo queda si el llavero no está disponible.
-    if !settings.iure_app_password.trim().is_empty() {
-        if let Ok(acc) = Account::new(&settings.iure_domain, &settings.iure_email) {
-            if secrets::guardar(&acc, secrets::Kind::WebDav, settings.iure_app_password.trim()).is_ok() {
-                to_disk.iure_app_password.clear();
-            }
+    if let Ok(acc) = Account::new(&settings.iure_domain, &settings.iure_email) {
+        if settings.iure_app_password.trim().is_empty() {
+            // Campo vaciado por el usuario: se elimina también del llavero.
+            let _ = secrets::borrar(&acc, secrets::Kind::WebDav);
+        } else if secrets::guardar(&acc, secrets::Kind::WebDav, settings.iure_app_password.trim()).is_ok() {
+            to_disk.iure_app_password.clear();
         }
     }
     to_disk.save(&state.settings_path).map_err(|e| e.to_string())?;

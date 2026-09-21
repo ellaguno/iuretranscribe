@@ -59,6 +59,10 @@
   </div>
 
   <div class="foot">
+    <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? "Conectado a Iurefficient" : "Conectar con Iurefficient"}>
+      <Icon name="cloud" size={15} />
+      <span>{app.iureSession?.loggedIn ? `Iurefficient: ${app.iureSession.name ?? "conectado"}` : "Conectar con Iurefficient"}</span>
+    </button>
     <div class="row">
       <Icon name="cpu" size={15} />
       <span>{app.sys?.backend ?? "…"}</span>
@@ -99,4 +103,7 @@
   .row { display: flex; align-items: center; gap: 7px; overflow: hidden; }
   .row span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .warn { color: var(--warn); }
+  .conn { text-align: left; color: var(--accent); font-weight: 600; padding: 4px 0; }
+  .conn.ok { color: var(--success); font-weight: 550; }
+  .conn:hover { text-decoration: underline; }
 </style>

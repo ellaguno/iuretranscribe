@@ -58,6 +58,14 @@
   </div>
 </header>
 
+{#if app.iureSession && !app.iureSession.loggedIn}
+  <button class="connect-banner" onclick={() => (app.view = "settings")}>
+    <Icon name="cloud" size={18} />
+    <span><strong>Conecta tu cuenta de Iurefficient</strong> para guardar transcripciones en tus proyectos, generar minutas con el motor del despacho y adjuntar a oportunidades del CRM.</span>
+    <span class="go">Conectar <Icon name="chevronRight" size={14} /></span>
+  </button>
+{/if}
+
 <div class="toolbar">
   <button class="btn" onclick={pickFiles}><Icon name="plus" size={16} /> Agregar archivos</button>
   {#if app.running}
@@ -103,6 +111,8 @@
   .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 26px 12px; }
   .controls { display: flex; gap: 12px; }
   .controls .field { min-width: 190px; }
+  .connect-banner { margin: 0 26px 10px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text); text-align: left; font-size: 13px; }
+  .connect-banner .go { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 650; white-space: nowrap; }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 6px 26px 14px; }
   .spacer { flex: 1; }
   .dropzone { flex: 1; margin: 0 26px 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--border-strong); border-radius: 16px; color: var(--text-2); background: var(--surface); transition: border-color 0.15s, background 0.15s; }
