@@ -211,7 +211,14 @@ export async function openWithEditor(path: string): Promise<void> {
  * Argumentos de arranque o de una segunda instancia: rutas de archivo (se agregan a
  * la cola) o enlaces `iuretranscribe://` (`transcribe?path=…`, `record`, `settings`).
  */
-export async function handleLaunchArgs(args: string[]): Promise<void> {
+let launchChain: Promise<void> = Promise.resolve();
+export function handleLaunchArgs(args: string[]): Promise<void> {
+  // En serie: dos entregas casi simultáneas (arranque + segunda instancia) no
+  // deben encolar el mismo archivo dos veces.
+  launchChain = launchChain.then(() => handleLaunchArgsNow(args)).catch((e) => console.warn("launch-args:", e));
+  return launchChain;
+}
+async function handleLaunchArgsNow(args: string[]): Promise<void> {
   const paths: string[] = [];
   for (const raw of args) {
     if (!raw) continue;

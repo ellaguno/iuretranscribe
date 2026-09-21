@@ -1080,7 +1080,9 @@ pub fn run() {
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
-            let args: Vec<String> = argv.into_iter().skip(1).filter(|a| !a.starts_with('-')).collect();
+            // Los enlaces `iuretranscribe://` ya los entrega el plugin deep-link
+            // (función `deep-link` de single-instance); aquí sólo van rutas de archivo.
+            let args: Vec<String> = argv.into_iter().skip(1).filter(|a| !a.starts_with('-') && !a.contains("://")).collect();
             if !args.is_empty() {
                 let _ = app.emit("launch-args", args);
             }
