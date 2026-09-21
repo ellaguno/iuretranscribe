@@ -300,8 +300,9 @@ export const api = {
   iureCompose: (req: { blueprintId: string; caseId: string | null; sourceDocumentIds: string[]; title: string | null; attendees: string[]; extraInstructions: string | null }) =>
     invoke<string>("iure_compose", { request: req }),
   iureComposeStatus: (taskId: string) => invoke<IureComposeStatus>("iure_compose_status", { taskId }),
-  iureDownloadDocument: (documentId: string, targetDir: string, fileName: string) =>
-    invoke<string>("iure_download_document", { request: { documentId, targetDir, fileName } }),
+  /** `baseName` sin extensión: el backend añade la del documento real (.md, .docx…). */
+  iureDownloadDocument: (documentId: string, targetDir: string, baseName: string) =>
+    invoke<string>("iure_download_document", { request: { documentId, targetDir, baseName } }),
   iureCrmSearch: (kind: IureCrmKind, query: string) => invoke<IureCrmItem[]>("iure_crm_search", { kind, query }),
   iureUploadToCrm: (req: { jobId: string; kind: IureCrmKind; id: string; files: string[]; activitySubject: string | null; activityDescription: string | null; durationMinutes: number | null }) =>
     invoke<IureCrmUploadResult>("iure_upload_to_crm", { request: req }),

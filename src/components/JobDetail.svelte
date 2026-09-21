@@ -207,12 +207,12 @@
               {#if c.state === "SUCCESS"}
                 <span class="pill success"><Icon name="check" size={11} stroke={3} /> {c.blueprintName}</span>
                 {#if c.localPath}
-                  <button class="btn sm" onclick={() => openFile(c.localPath!)}><Icon name="file" size={13} /> Abrir .docx</button>
+                  <button class="btn sm" onclick={() => openFile(c.localPath!)}><Icon name="file" size={13} /> Abrir {c.localPath.split(".").pop()?.toUpperCase()}</button>
                   <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(c.localPath!)}><Icon name="folder" size={13} /></button>
                 {:else if c.documentId}
                   <button class="btn sm ghost" onclick={() => downloadComposed(job, c)}><Icon name="download" size={13} /> Descargar junto a la transcripción</button>
                 {/if}
-                {#if c.link}<button class="btn sm ghost" onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Abrir en Iurefficient</button>{/if}
+                {#if c.link}<button class="btn sm ghost" title={job.iure?.caseId ? "Documentos del proyecto" : "Documentos → General (sin proyecto)"} onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Ver en Iurefficient</button>{/if}
               {:else if c.error}
                 <span class="pill danger">{c.blueprintName}: {c.error}</span>
               {:else}

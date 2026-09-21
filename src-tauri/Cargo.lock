@@ -2130,8 +2130,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "iurefficient-connect"
-version = "0.2.0"
-source = "git+https://github.com/ellaguno/iurefficient-connect?tag=v0.2.0#b0b048aa3c77f6d196f7156a512b8b013a742140"
+version = "0.2.1"
+source = "git+https://github.com/ellaguno/iurefficient-connect?tag=v0.2.1#a2b49ecd3115cc38ccdd0a13990091fa424f0157"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "iuretranscribe"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "bytes",

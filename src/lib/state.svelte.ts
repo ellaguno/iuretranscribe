@@ -778,13 +778,22 @@ function stopComposePoll(jobId: string) {
   composePolls.delete(jobId);
 }
 
-/** Descarga el documento generado a la carpeta de salida del trabajo. */
+/** Descarga el documento generado a la carpeta de salida del trabajo (con su extensión real)
+ *  y, si es texto o Markdown, lo muestra como contenido de la pestaña correspondiente. */
 export async function downloadComposed(job: Job, c: ComposedDoc) {
   if (!c.documentId || !job.result) return;
   const base = job.result.baseName;
   const slug = c.blueprintName.toLowerCase().replace(/[^a-z0-9áéíóúñü]+/gi, "-").replace(/^-|-$/g, "");
   try {
-    c.localPath = await api.iureDownloadDocument(c.documentId, job.result.outputDir, `${base}_${slug}.docx`);
+    c.localPath = await api.iureDownloadDocument(c.documentId, job.result.outputDir, `${base}_${slug}`);
+    if (/\.(md|markdown|txt)$/i.test(c.localPath)) {
+      const content = await api.readTextFile(c.localPath);
+      const slot = /resumen|summary|síntesis|sintesis/i.test(`${c.genre} ${c.blueprintName}`) ? job.summary : job.minutes;
+      slot.status = "done";
+      slot.content = content;
+      slot.path = c.localPath;
+      slot.error = undefined;
+    }
   } catch (e) {
     console.warn("descarga de documento generado", e);
   }

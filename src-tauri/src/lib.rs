@@ -803,7 +803,8 @@ struct IureDownloadRequest {
     document_id: String,
     /// Carpeta local donde guardar (normalmente la de salida del trabajo).
     target_dir: String,
-    file_name: String,
+    /// Nombre base sin extensión; la extensión se toma del documento real (.md, .docx…).
+    base_name: String,
 }
 
 /// Descarga un documento de la instancia (p. ej. la minuta generada) a la carpeta de salida.
@@ -812,8 +813,21 @@ async fn iure_download_document(state: State<'_, AppState>, request: IureDownloa
     let sess = iure_session(&state).await?;
     let dir = PathBuf::from(&request.target_dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let safe: String = request.file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
-    let path = dir.join(safe);
+    let info = api::document(&sess, &request.document_id).await.map_err(|e| format!("{e:#}"))?;
+    let ext = Path::new(&info.file_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .or_else(|| match info.mime_type.as_deref() {
+            Some("text/markdown") => Some("md".into()),
+            Some("text/plain") => Some("txt".into()),
+            Some(m) if m.contains("wordprocessingml") => Some("docx".into()),
+            Some("application/pdf") => Some("pdf".into()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "md".into());
+    let safe: String = request.base_name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
+    let path = dir.join(format!("{safe}.{ext}"));
     api::download_document(&sess, &request.document_id, &path).await.map_err(|e| format!("{e:#}"))?;
     Ok(path.to_string_lossy().into_owned())
 }
