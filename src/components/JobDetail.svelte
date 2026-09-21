@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { api, type DocKind } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { app, generateDoc, isActive, metaFilled, metaFilledByUser, retranscribe, toast, type Job } from "../lib/state.svelte";
@@ -31,11 +32,16 @@
     // Autoscroll mientras llegan segmentos en vivo.
     if (isActive(job) && listEl && segments.length) listEl.scrollTop = listEl.scrollHeight;
   });
+  // Sólo al cambiar de archivo: `untrack` evita que el efecto dependa de los campos
+  // del formulario (si no, se plegaba con cada tecla al detectar datos capturados).
   $effect(() => {
-    if (job.id) {
-      tab = "transcript";
-      showMeta = !metaFilledByUser(job.meta);
-    }
+    const id = job.id;
+    untrack(() => {
+      if (id) {
+        tab = "transcript";
+        showMeta = !metaFilledByUser(job.meta);
+      }
+    });
   });
 
   async function copyText() {
