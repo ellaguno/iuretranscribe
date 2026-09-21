@@ -1,6 +1,6 @@
 [package]
 name = "iuretranscribe"
-version = "0.2.2"
+version = "0.2.3"
 description = "Transcripción de audio y video con Whisper, con resumen y minuta"
 authors = ["Iurefficient"]
 edition = "2021"
@@ -34,9 +34,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 
 hound = "3.5"
-roxmltree = "0.21"
-url = "2"
-percent-encoding = "2"
+iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.1.0" }
 
 # Captura de audio con cpal en Windows/macOS; en Linux se usa PipeWire/PulseAudio por subproceso.
 [target.'cfg(not(target_os = "linux"))'.dependencies]

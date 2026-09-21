@@ -34,8 +34,9 @@ duplicado, igual que en la aplicación web. Las instancias no admiten `.srt`/`.v
 por defecto: en ese caso se suben como `.txt` (p. ej. `reunion.srt.txt`).
 
 Esta es la fase 0 de la integración, que no requiere cambios en el servidor. El
-conector vive en `src-tauri/src/iurefficient.rs` sin dependencias de Tauri, para
-extraerlo a un crate común (`iurefficient-connect`) cuando lo use otra aplicación.
+conector es el crate común [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect),
+compartido con IureEditor e IureDav; la contraseña de aplicación se guarda en el
+llavero del sistema (la misma entrada que usa IureDav), no en el archivo de ajustes.
 Las siguientes fases (resumen y minuta con el motor de Iurefficient, adjuntar a una
 oportunidad o lead del CRM, registrar horas) necesitan una llave de aplicación para
 la API REST de la instancia.

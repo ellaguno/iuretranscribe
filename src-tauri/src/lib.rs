@@ -1,5 +1,4 @@
 mod audio;
-mod iurefficient;
 mod llm;
 mod models;
 mod recorder;
@@ -7,6 +6,7 @@ mod settings;
 mod subtitles;
 mod transcribe;
 
+use iurefficient_connect::{secrets, webdav::WebDav, Account};
 use models::{Downloads, ModelInfo};
 use recorder::Recorder;
 use serde::{Deserialize, Serialize};
@@ -134,12 +134,30 @@ fn system_info(state: State<'_, AppState>) -> SystemInfo {
 
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Settings {
-    state.settings.lock().unwrap().clone()
+    let mut s = state.settings.lock().unwrap().clone();
+    if s.iure_app_password.is_empty() {
+        if let Ok(acc) = Account::new(&s.iure_domain, &s.iure_email) {
+            if let Ok(Some(p)) = secrets::leer(&acc, secrets::Kind::WebDav) {
+                s.iure_app_password = p;
+            }
+        }
+    }
+    s
 }
 
 #[tauri::command]
 fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    settings.save(&state.settings_path).map_err(|e| e.to_string())?;
+    let mut to_disk = settings.clone();
+    // La contraseña WebDAV va al llavero del sistema (compartido con IureDav); en el
+    // archivo sólo queda si el llavero no está disponible.
+    if !settings.iure_app_password.trim().is_empty() {
+        if let Ok(acc) = Account::new(&settings.iure_domain, &settings.iure_email) {
+            if secrets::guardar(&acc, secrets::Kind::WebDav, settings.iure_app_password.trim()).is_ok() {
+                to_disk.iure_app_password.clear();
+            }
+        }
+    }
+    to_disk.save(&state.settings_path).map_err(|e| e.to_string())?;
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }
@@ -479,21 +497,32 @@ fn recording_status(state: State<'_, AppState>) -> recorder::RecordingStatus {
 // ---------------------------------------------------------------------------
 // Iurefficient (fase 0: WebDAV con contraseña de aplicación)
 // ---------------------------------------------------------------------------
-fn iure_account(state: &AppState) -> Result<iurefficient::Account, String> {
+fn iure_user_agent() -> String {
+    iurefficient_connect::user_agent("IureTranscribe", env!("CARGO_PKG_VERSION"))
+}
+
+/// Cuenta configurada y contraseña WebDAV: primero el llavero del sistema
+/// (compartido con IureDav), después el ajuste local por compatibilidad.
+fn iure_webdav(state: &AppState) -> Result<WebDav, String> {
     let s = state.settings.lock().unwrap().clone();
-    iurefficient::Account::new(&s.iure_domain, &s.iure_email, &s.iure_app_password).map_err(|e| e.to_string())
+    let acc = Account::new(&s.iure_domain, &s.iure_email).map_err(|e| e.to_string())?;
+    let password = match secrets::leer(&acc, secrets::Kind::WebDav) {
+        Ok(Some(p)) => p,
+        _ => s.iure_app_password.clone(),
+    };
+    WebDav::new(acc, &password, &iure_user_agent()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn iure_test_connection(state: State<'_, AppState>) -> Result<iurefficient::ConnectionInfo, String> {
-    let acc = iure_account(&state)?;
-    iurefficient::test_connection(&acc).await.map_err(|e| format!("{e:#}"))
+async fn iure_test_connection(state: State<'_, AppState>) -> Result<iurefficient_connect::webdav::ConnectionInfo, String> {
+    let dav = iure_webdav(&state)?;
+    dav.test_connection().await.map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
-async fn iure_list(state: State<'_, AppState>, folder: String) -> Result<iurefficient::Listing, String> {
-    let acc = iure_account(&state)?;
-    iurefficient::list(&acc, &folder).await.map_err(|e| format!("{e:#}"))
+async fn iure_list(state: State<'_, AppState>, folder: String) -> Result<iurefficient_connect::webdav::Listing, String> {
+    let dav = iure_webdav(&state)?;
+    dav.list(&folder).await.map_err(|e| format!("{e:#}"))
 }
 
 #[derive(Deserialize)]
@@ -521,12 +550,12 @@ struct IureUploadProgress {
 struct IureUploadResult {
     folder: String,
     web_url: String,
-    uploaded: Vec<iurefficient::Uploaded>,
+    uploaded: Vec<iurefficient_connect::webdav::Uploaded>,
 }
 
 #[tauri::command]
 async fn iure_upload(app: AppHandle, state: State<'_, AppState>, request: IureUploadRequest) -> Result<IureUploadResult, String> {
-    let acc = iure_account(&state)?;
+    let dav = iure_webdav(&state)?;
     let total_files = request.files.len();
     let mut uploaded = Vec::new();
     for (index, f) in request.files.iter().enumerate() {
@@ -534,37 +563,23 @@ async fn iure_upload(app: AppHandle, state: State<'_, AppState>, request: IureUp
         let file_name = local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let app2 = app.clone();
         let job_id = request.job_id.clone();
-        let fname = file_name.clone();
         let last = Arc::new(Mutex::new(std::time::Instant::now()));
         let progress = move |sent: u64, total: u64| {
             let mut last = last.lock().unwrap();
             if last.elapsed().as_millis() > 120 || sent == total {
                 *last = std::time::Instant::now();
-                let _ = app2.emit("iure-upload-progress", IureUploadProgress { job_id: job_id.clone(), file_name: fname.clone(), index, total_files, sent, total });
+                let _ = app2.emit("iure-upload-progress", IureUploadProgress { job_id: job_id.clone(), file_name: file_name.clone(), index, total_files, sent, total });
             }
         };
-        let res = match iurefficient::upload(&acc, &request.folder, &local, None, progress.clone()).await {
-            Ok(r) => r,
-            // Extensión rechazada (p. ej. .srt): reintenta como .txt para no perder la transcripción.
-            Err(e) if e.to_string().contains("403") => match iurefficient::fallback_name(&file_name) {
-                Some(alt) => {
-                    let mut r = iurefficient::upload(&acc, &request.folder, &local, Some(&alt), progress).await.map_err(|e| format!("{e:#}"))?;
-                    r.renamed_from = Some(file_name.clone());
-                    r
-                }
-                None => return Err(format!("{e:#}")),
-            },
-            Err(e) => return Err(format!("{e:#}")),
-        };
+        let res = dav.upload_with_fallback(&request.folder, &local, progress).await.map_err(|e| format!("{e:#}"))?;
         uploaded.push(res);
     }
-    // Recuerda la carpeta para la próxima vez.
     {
         let mut s = state.settings.lock().unwrap();
         s.iure_last_folder = Some(request.folder.clone());
         let _ = s.save(&state.settings_path);
     }
-    Ok(IureUploadResult { folder: request.folder, web_url: acc.web_url(), uploaded })
+    Ok(IureUploadResult { folder: request.folder, web_url: dav.acc.web_url(), uploaded })
 }
 
 #[tauri::command]
@@ -597,7 +612,14 @@ pub fn run() {
             std::fs::create_dir_all(&models_dir)?;
             let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
-            let settings = Settings::load(&settings_path);
+            let mut settings = Settings::load(&settings_path);
+            if settings.iure_app_password.is_empty() {
+                if let Ok(acc) = Account::new(&settings.iure_domain, &settings.iure_email) {
+                    if let Ok(Some(p)) = secrets::leer(&acc, secrets::Kind::WebDav) {
+                        settings.iure_app_password = p;
+                    }
+                }
+            }
             app.manage(AppState {
                 settings_path,
                 jobs_path: data_dir.join("jobs.json"),
