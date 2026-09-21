@@ -40,10 +40,14 @@
     ],
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [],
+        "desktopTemplate": "./linux/app.desktop"
       },
       "appimage": {
         "bundleMediaFramework": false
+      },
+      "rpm": {
+        "desktopTemplate": "./linux/app.desktop"
       }
     },
     "macOS": {
