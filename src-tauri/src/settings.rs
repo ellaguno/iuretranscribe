@@ -54,6 +54,8 @@ pub struct Settings {
     pub iure_upload_media: bool,
     /// Última carpeta WebDAV usada al guardar (ruta relativa, p. ej. "Clientes/Acme/Proyecto X").
     pub iure_last_folder: Option<String>,
+    /// Al guardar en un proyecto, generar la minuta con el motor de Iurefficient automáticamente.
+    pub iure_auto_compose: bool,
 }
 
 impl Default for Settings {
@@ -88,6 +90,7 @@ impl Default for Settings {
             iure_app_password: String::new(),
             iure_upload_media: true,
             iure_last_folder: None,
+            iure_auto_compose: true,
         }
     }
 }

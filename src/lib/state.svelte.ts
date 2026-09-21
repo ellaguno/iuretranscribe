@@ -2,6 +2,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
+  type IureAiOptions,
+  type IureBlueprint,
   type IureCrmKind,
   type IureDocRef,
   type IureSessionStatus,
@@ -84,8 +86,25 @@ export interface IureSaved {
   documents?: IureDocRef[];
   crm?: { kind: IureCrmKind; id: string; name: string; activityId: string | null };
   timeEntryId?: string | null;
-  /** Documento generado con el motor de Iurefficient (minuta). */
-  composed?: { taskId: string; blueprintName: string; documentId: string | null; link: string | null; state: string; section: string | null; current: number; total: number; error: string | null };
+  /** Documentos generados con el motor de Iurefficient (minuta, resumen…). */
+  composed?: ComposedDoc[];
+}
+
+export interface ComposedDoc {
+  taskId: string;
+  blueprintId: string;
+  blueprintName: string;
+  genre: string;
+  documentId: string | null;
+  link: string | null;
+  /** Copia local descargada a la carpeta de salida. */
+  localPath: string | null;
+  state: string;
+  section: string | null;
+  current: number;
+  total: number;
+  error: string | null;
+  startedAt: number;
 }
 
 export interface Job {
@@ -207,6 +226,7 @@ async function restoreJobs() {
   if (!Array.isArray(stored) || !stored.length) return;
   const jobs: Job[] = stored.map((j) => ({
     ...j,
+    iure: j.iure && j.iure.composed && !Array.isArray(j.iure.composed) ? { ...j.iure, composed: [j.iure.composed as unknown as ComposedDoc] } : j.iure,
     status: isActive(j as Job) ? "queued" : j.status,
     liveSegments: [],
     summary: j.summary ?? { status: "idle" },
@@ -570,8 +590,9 @@ export async function saveToCase(job: Job, caseId: string, caseTitle: string, in
   try {
     const transcriptPath = job.result?.outputs.find((o) => o.format === "txt")?.path ?? job.result?.outputs.find((o) => o.format === "srt")?.path ?? null;
     const res = await api.iureUploadToCase({ jobId: job.id, caseId, files, transcriptPath, hours, hoursDescription: hours ? `Reunión: ${job.name}` : null });
-    job.iure = { mode: "case", folder: caseTitle, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), caseId, caseTitle, documents: res.documents, timeEntryId: res.timeEntryId };
+    job.iure = { mode: "case", folder: caseTitle, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), caseId, caseTitle, documents: res.documents, timeEntryId: res.timeEntryId, composed: [] };
     toast(`Guardado en ${caseTitle} (${res.documents.length} documento(s)${res.timeEntryId ? ", horas registradas" : ""})`, "success", 6000);
+    autoComposeMinutes(job); // en segundo plano
     return true;
   } catch (e) {
     toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);
@@ -612,65 +633,122 @@ export async function saveToCrm(job: Job, kind: IureCrmKind, id: string, name: s
   }
 }
 
-let composePoll: ReturnType<typeof setInterval> | undefined;
+/** Documento de transcripción subido a la instancia para este trabajo. */
+export function iureTranscriptDoc(job: Job): IureDocRef | undefined {
+  return job.iure?.documents?.find((d) => d.isTranscript) ?? job.iure?.documents?.[0];
+}
 
-/** Genera un documento (minuta) con el motor de Iurefficient a partir de la transcripción subida. */
-export async function composeWithIurefficient(job: Job, blueprintId: string, blueprintName: string) {
-  const transcript = job.iure?.documents?.find((d) => d.isTranscript) ?? job.iure?.documents?.[0];
+/** Espera a que la instancia tenga texto del documento (extracción asíncrona) y devuelve las opciones. */
+export async function iureWaitAiOptions(docId: string, tries = 10): Promise<IureAiOptions> {
+  let last: IureAiOptions | null = null;
+  for (let i = 0; i < tries; i++) {
+    last = await api.iureAiOptions(docId);
+    if (last.canGenerate || last.reason !== "no_text") return last;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return last!;
+}
+
+/** Genera un documento (minuta, resumen…) con el motor de Iurefficient a partir de la transcripción subida. */
+export async function composeWithIurefficient(job: Job, blueprint: { id: string; name: string; genre: string }): Promise<boolean> {
+  const transcript = iureTranscriptDoc(job);
   if (!job.iure || !transcript) {
     toast("Primero guarda la transcripción en un proyecto de Iurefficient", "error");
-    return;
+    return false;
   }
   const attendees = job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean);
   try {
     const taskId = await api.iureCompose({
-      blueprintId,
+      blueprintId: blueprint.id,
       caseId: job.iure.caseId ?? null,
       sourceDocumentIds: [transcript.id],
-      title: `${blueprintName} · ${job.name.replace(/\.[^.]+$/, "")}`,
+      title: `${blueprint.name} · ${job.name.replace(/\.[^.]+$/, "")}`,
       attendees,
       extraInstructions: metaToContext(job.meta) || null,
     });
-    job.iure.composed = { taskId, blueprintName, documentId: null, link: null, state: "PENDING", section: null, current: 0, total: 0, error: null };
+    if (!job.iure.composed) job.iure.composed = [];
+    job.iure.composed.push({ taskId, blueprintId: blueprint.id, blueprintName: blueprint.name, genre: blueprint.genre, documentId: null, link: null, localPath: null, state: "PENDING", section: null, current: 0, total: 0, error: null, startedAt: Date.now() });
+    toast(`Generando «${blueprint.name}» en Iurefficient…`, "info", 4000);
     pollCompose(job);
+    return true;
   } catch (e) {
     toast(`No se pudo iniciar la generación: ${e}`, "error", 9000);
+    return false;
   }
 }
 
+/** Tras guardar en un proyecto: lanza el formato de minuta sugerido por la instancia. */
+export async function autoComposeMinutes(job: Job) {
+  const transcript = iureTranscriptDoc(job);
+  if (!transcript || !app.settings?.iureAutoCompose) return;
+  try {
+    const o = await iureWaitAiOptions(transcript.id);
+    if (!o.canGenerate) {
+      toast(o.reason === "no_text" ? "Iurefficient aún no ha extraído el texto; genera la minuta desde la pestaña Minuta en un momento." : "Iurefficient no puede generar a partir de ese documento.", "info", 8000);
+      return;
+    }
+    const isMinuta = (b: IureBlueprint) => /minuta|minute|acta/i.test(`${b.genre} ${b.name}`);
+    const pick = o.blueprints.find((b) => b.suggested && isMinuta(b)) ?? o.blueprints.find(isMinuta) ?? o.blueprints.find((b) => b.suggested);
+    if (!pick) {
+      toast("La instancia no tiene un formato de minuta publicado; elige uno en la pestaña Minuta.", "info", 8000);
+      return;
+    }
+    await composeWithIurefficient(job, pick);
+  } catch (e) {
+    toast(`No se pudo generar la minuta automáticamente: ${e}`, "error", 8000);
+  }
+}
+
+const composePolls = new Map<string, ReturnType<typeof setInterval>>();
+
 export function pollCompose(job: Job) {
-  if (composePoll) clearInterval(composePoll);
+  if (composePolls.has(job.id)) return;
   const tick = async () => {
-    const c = job.iure?.composed;
-    if (!c || !job.iure) return stopComposePoll();
-    try {
-      const st = await api.iureComposeStatus(c.taskId);
-      c.state = st.state;
-      c.section = st.section;
-      c.current = st.current;
-      c.total = st.total;
-      if (st.state === "SUCCESS") {
-        c.documentId = st.documentId;
-        c.link = st.link ? (st.link.startsWith("http") ? st.link : job.iure.webUrl.replace(/\/$/, "") + st.link) : null;
-        toast(`${c.blueprintName} generada en Iurefficient`, "success", 7000);
-        stopComposePoll();
-      } else if (st.state === "FAILURE" || st.state === "REVOKED") {
-        c.error = st.error ?? "La generación falló";
-        toast(`Iurefficient no pudo generar el documento: ${c.error}`, "error", 9000);
-        stopComposePoll();
+    const pending = (job.iure?.composed ?? []).filter((c) => !c.error && c.state !== "SUCCESS" && c.state !== "FAILURE");
+    if (!pending.length || !job.iure) return stopComposePoll(job.id);
+    for (const c of pending) {
+      try {
+        const st = await api.iureComposeStatus(c.taskId);
+        c.state = st.state;
+        c.section = st.section;
+        c.current = st.current;
+        c.total = st.total;
+        if (st.state === "SUCCESS") {
+          c.documentId = st.documentId;
+          c.link = st.link ? (st.link.startsWith("http") ? st.link : job.iure.webUrl.replace(/\/$/, "") + st.link) : null;
+          toast(`«${c.blueprintName}» generada en Iurefficient`, "success", 7000);
+          downloadComposed(job, c);
+        } else if (st.state === "FAILURE" || st.state === "REVOKED") {
+          c.error = st.error ?? "La generación falló";
+          toast(`Iurefficient no pudo generar «${c.blueprintName}»: ${c.error}`, "error", 9000);
+        } else if (Date.now() - c.startedAt > 30 * 60 * 1000) {
+          c.error = "Sin respuesta de la instancia tras 30 minutos";
+        }
+      } catch (e) {
+        c.error = String(e);
       }
-    } catch (e) {
-      c.error = String(e);
-      stopComposePoll();
     }
   };
   tick();
-  composePoll = setInterval(tick, 3000);
+  composePolls.set(job.id, setInterval(tick, 3000));
 }
 
-function stopComposePoll() {
-  if (composePoll) clearInterval(composePoll);
-  composePoll = undefined;
+function stopComposePoll(jobId: string) {
+  const t = composePolls.get(jobId);
+  if (t) clearInterval(t);
+  composePolls.delete(jobId);
+}
+
+/** Descarga el documento generado a la carpeta de salida del trabajo. */
+export async function downloadComposed(job: Job, c: ComposedDoc) {
+  if (!c.documentId || !job.result) return;
+  const base = job.result.baseName;
+  const slug = c.blueprintName.toLowerCase().replace(/[^a-z0-9áéíóúñü]+/gi, "-").replace(/^-|-$/g, "");
+  try {
+    c.localPath = await api.iureDownloadDocument(c.documentId, job.result.outputDir, `${base}_${slug}.docx`);
+  } catch (e) {
+    console.warn("descarga de documento generado", e);
+  }
 }
 
 export function iureConfigured(): boolean {

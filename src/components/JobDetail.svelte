@@ -8,19 +8,19 @@
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
   import IurePicker from "./IurePicker.svelte";
-  import { composeWithIurefficient, iureConfigured, iureLoggedIn, pollCompose } from "../lib/state.svelte";
+  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose } from "../lib/state.svelte";
   import type { IureBlueprint } from "../lib/api";
 
   let blueprints = $state<IureBlueprint[] | null>(null);
   let loadingBlueprints = $state(false);
   let blueprintError = $state("");
   async function loadBlueprints() {
-    const doc = job.iure?.documents?.find((d) => d.isTranscript) ?? job.iure?.documents?.[0];
+    const doc = iureTranscriptDoc(job);
     if (!doc) return;
     loadingBlueprints = true;
     blueprintError = "";
     try {
-      const o = await api.iureAiOptions(doc.id);
+      const o = await iureWaitAiOptions(doc.id, 4);
       if (!o.canGenerate) blueprintError = o.reason === "no_text" ? "La instancia todavía no ha extraído el texto del documento; inténtalo en unos segundos." : "No se puede generar a partir de ese documento.";
       blueprints = o.blueprints;
     } catch (e) {
@@ -29,10 +29,22 @@
       loadingBlueprints = false;
     }
   }
+  const label = (b: { genre: string; name?: string; blueprintName?: string }) => `${b.genre} ${b.name ?? b.blueprintName ?? ""}`;
+  const isMinuta = (b: { genre: string; name?: string; blueprintName?: string }) => /minuta|minute|acta/i.test(label(b));
+  const isResumen = (b: { genre: string; name?: string; blueprintName?: string }) => /resumen|summary|síntesis|sintesis/i.test(label(b));
+  function blueprintsFor(kind: "summary" | "minutes"): IureBlueprint[] {
+    if (!blueprints) return [];
+    const f = kind === "minutes" ? blueprints.filter(isMinuta) : blueprints.filter(isResumen);
+    return f.length ? f : blueprints;
+  }
+  function composedFor(kind: "summary" | "minutes") {
+    const all = job.iure?.composed ?? [];
+    const f = kind === "minutes" ? all.filter(isMinuta) : all.filter(isResumen);
+    return f.length ? f : kind === "minutes" ? all.filter((c) => !isResumen(c)) : all.filter((c) => !isMinuta(c));
+  }
   $effect(() => {
-    // Reanuda el seguimiento de una generación en curso tras reiniciar.
-    const c = job.iure?.composed;
-    if (c && c.state !== "SUCCESS" && c.state !== "FAILURE" && !c.error) pollCompose(job);
+    // Reanuda el seguimiento de generaciones en curso tras reiniciar.
+    if ((job.iure?.composed ?? []).some((c) => !c.error && c.state !== "SUCCESS" && c.state !== "FAILURE")) pollCompose(job);
   });
 
   let { job }: { job: Job } = $props();
@@ -70,7 +82,7 @@
   });
 
   async function copyText() {
-    const text = job.result ? job.result.text : job.liveSegments.map((s) => s.text).join(" ");
+    const text = (job.result ? job.result.segments : job.liveSegments).map((s) => s.text.trim()).filter(Boolean).join("\n");
     await navigator.clipboard.writeText(text);
     toast("Texto copiado al portapapeles", "success", 2000);
   }
@@ -174,45 +186,53 @@
     {@const kind = tab}
     {@const doc = kind === "summary" ? job.summary : job.minutes}
     <div class="body scroll">
-      {#if kind === "minutes" && job.result && iureLoggedIn()}
+      {#if job.result && iureLoggedIn()}
         <div class="engine card-inner">
           <div class="engine-head">
-            <span class="label"><Icon name="cloud" size={14} /> Minuta con el motor de Iurefficient</span>
-            {#if job.iure?.composed}
-              {@const c = job.iure.composed}
-              {#if c.state === "SUCCESS"}
-                <span class="pill success"><Icon name="check" size={11} stroke={3} /> {c.blueprintName} generada</span>
-                {#if c.link}<button class="btn sm" onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Abrir en Iurefficient</button>{/if}
-              {:else if c.error}
-                <span class="pill danger">Error: {c.error}</span>
-              {:else}
-                <span class="pill accent"><span class="spin"><Icon name="loader" size={11} /></span> {c.section ? `Sección ${c.current} de ${c.total}: ${c.section}` : "Generando…"}</span>
-              {/if}
-            {/if}
+            <span class="label"><Icon name="cloud" size={14} /> {kind === "minutes" ? "Minuta" : "Resumen"} con el motor de Iurefficient</span>
+            <span class="hint">Con el formato del despacho, sin llave de OpenRouter.</span>
           </div>
-          {#if !job.iure?.documents?.length}
-            <p class="hint">Guarda primero la transcripción en un proyecto de Iurefficient (botón «Guardar en Iurefficient») y aquí podrás generarla con el formato del despacho, sin llave de OpenRouter.</p>
-          {:else if !job.iure.composed || job.iure.composed.error || job.iure.composed.state === "SUCCESS"}
-            {#if blueprints === null}
-              <button class="btn sm" onclick={loadBlueprints} disabled={loadingBlueprints}>
-                {#if loadingBlueprints}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="sparkles" size={13} />{/if} {job.iure.composed ? "Generar de nuevo" : "Elegir formato y generar"}
-              </button>
-            {:else}
-              {#if blueprintError}<p class="hint errtxt">{blueprintError}</p>{/if}
-              {#if blueprints.length}
-                <div class="bps">
-                  {#each blueprints as b (b.id)}
-                    <button class="bp" class:suggested={b.suggested} onclick={() => composeWithIurefficient(job, b.id, b.name)} disabled={!!blueprintError}>
-                      <strong>{b.name}</strong>{b.suggested ? " · sugerido" : ""}
-                      <span class="hint">{b.description || `${b.genre} · ${b.sectionCount} secciones`}</span>
-                    </button>
-                  {/each}
-                </div>
-              {:else if !blueprintError}
-                <p class="hint">La instancia no tiene formatos (blueprints) publicados para generar documentos.</p>
+          {#each composedFor(kind) as c (c.taskId)}
+            <div class="composed">
+              {#if c.state === "SUCCESS"}
+                <span class="pill success"><Icon name="check" size={11} stroke={3} /> {c.blueprintName}</span>
+                {#if c.localPath}
+                  <button class="btn sm" onclick={() => openFile(c.localPath!)}><Icon name="file" size={13} /> Abrir .docx</button>
+                  <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(c.localPath!)}><Icon name="folder" size={13} /></button>
+                {:else if c.documentId}
+                  <button class="btn sm ghost" onclick={() => downloadComposed(job, c)}><Icon name="download" size={13} /> Descargar junto a la transcripción</button>
+                {/if}
+                {#if c.link}<button class="btn sm ghost" onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Abrir en Iurefficient</button>{/if}
+              {:else if c.error}
+                <span class="pill danger">{c.blueprintName}: {c.error}</span>
+              {:else}
+                <span class="pill accent"><span class="spin"><Icon name="loader" size={11} /></span> {c.blueprintName}: {c.section ? `sección ${c.current} de ${c.total} · ${c.section}` : "en cola…"}</span>
               {/if}
-              <button class="btn sm ghost" onclick={loadBlueprints} disabled={loadingBlueprints}><Icon name="refresh" size={13} /> Actualizar</button>
+            </div>
+          {/each}
+          {#if !iureTranscriptDoc(job)}
+            <p class="hint">Guarda primero la transcripción en un {app.iureSession?.terminology?.case ?? "proyecto"} con «Guardar en Iurefficient»; después podrás generar aquí con los formatos del despacho.</p>
+          {:else if blueprints === null}
+            <div>
+              <button class="btn sm primary" onclick={loadBlueprints} disabled={loadingBlueprints}>
+                {#if loadingBlueprints}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="sparkles" size={13} />{/if} {composedFor(kind).length ? "Generar otro formato" : "Elegir formato y generar"}
+              </button>
+            </div>
+          {:else}
+            {#if blueprintError}<p class="hint errtxt">{blueprintError}</p>{/if}
+            {#if blueprintsFor(kind).length}
+              <div class="bps">
+                {#each blueprintsFor(kind) as b (b.id)}
+                  <button class="bp" class:suggested={b.suggested} onclick={() => composeWithIurefficient(job, b)} disabled={!!blueprintError}>
+                    <strong>{b.name}</strong>{b.suggested ? " · sugerido" : ""}
+                    <span class="hint">{b.description || `${b.genre} · ${b.sectionCount} secciones`}</span>
+                  </button>
+                {/each}
+              </div>
+            {:else if !blueprintError}
+              <p class="hint">La instancia no tiene formatos (blueprints) publicados para generar documentos.</p>
             {/if}
+            <div><button class="btn sm ghost" onclick={loadBlueprints} disabled={loadingBlueprints}><Icon name="refresh" size={13} /> Actualizar formatos</button></div>
           {/if}
         </div>
       {/if}
@@ -229,8 +249,10 @@
       {:else}
         <div class="empty">
           {#if doc.status === "error"}<p class="err">{doc.error}</p>{/if}
-          {#if hasKey}
-            <button class="btn primary" onclick={() => generateDoc(job, kind)}>
+          {#if iureLoggedIn() && !hasKey}
+            <p class="hint">También puedes generar localmente con OpenRouter configurando una llave en Ajustes.</p>
+          {:else if hasKey}
+            <button class="btn {iureLoggedIn() ? '' : 'primary'}" onclick={() => generateDoc(job, kind)}>
               <Icon name="sparkles" size={16} /> Generar {kind === "summary" ? "resumen" : "minuta"}
             </button>
             <p class="hint">Se enviará la transcripción a OpenRouter ({app.settings?.openrouterModel}).</p>
@@ -268,6 +290,7 @@
   .meta-body { padding: 4px 18px 14px; }
   .engine { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
   .engine-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .composed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .engine .label { display: inline-flex; align-items: center; gap: 6px; }
   .errtxt { color: var(--danger); }
   .bps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }

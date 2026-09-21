@@ -796,6 +796,27 @@ async fn iure_compose_status(state: State<'_, AppState>, task_id: String) -> Res
     api::compose_status(&sess, &task_id).await.map_err(|e| format!("{e:#}"))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureDownloadRequest {
+    document_id: String,
+    /// Carpeta local donde guardar (normalmente la de salida del trabajo).
+    target_dir: String,
+    file_name: String,
+}
+
+/// Descarga un documento de la instancia (p. ej. la minuta generada) a la carpeta de salida.
+#[tauri::command]
+async fn iure_download_document(state: State<'_, AppState>, request: IureDownloadRequest) -> Result<String, String> {
+    let sess = iure_session(&state).await?;
+    let dir = PathBuf::from(&request.target_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe: String = request.file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c }).collect();
+    let path = dir.join(safe);
+    api::download_document(&sess, &request.document_id, &path).await.map_err(|e| format!("{e:#}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 async fn iure_crm_search(state: State<'_, AppState>, kind: String, query: String) -> Result<Vec<api::CrmItem>, String> {
     let sess = iure_session(&state).await?;
@@ -931,6 +952,7 @@ pub fn run() {
             iure_ai_options,
             iure_compose,
             iure_compose_status,
+            iure_download_document,
             iure_crm_search,
             iure_upload_to_crm,
             list_audio_devices,

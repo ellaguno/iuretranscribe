@@ -122,6 +122,13 @@
       </div>
     </div>
     {#if app.iureSession?.loggedIn}
+      <div class="switchrow">
+        <div>
+          <span class="label">Generar la minuta con Iurefficient al guardar en un {app.iureSession.terminology?.case ?? "proyecto"}</span>
+          <p class="hint">Usa el formato de minuta sugerido por la instancia y descarga el documento junto a la transcripción.</p>
+        </div>
+        <button class="switch" class:on={s.iureAutoCompose} aria-label="Minuta automática con Iurefficient" onclick={() => saveSettings({ iureAutoCompose: !s.iureAutoCompose })}></button>
+      </div>
       <div class="row"><button class="btn sm ghost" onclick={logout}><Icon name="x" size={14} /> Cerrar sesión</button></div>
     {:else}
       <div class="row">
