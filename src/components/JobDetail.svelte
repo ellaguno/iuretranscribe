@@ -8,7 +8,7 @@
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
   import IurePicker from "./IurePicker.svelte";
-  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose } from "../lib/state.svelte";
+  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose, uploadTranscriptOnly } from "../lib/state.svelte";
   import type { IureBlueprint } from "../lib/api";
 
   let blueprints = $state<IureBlueprint[] | null>(null);
@@ -49,6 +49,16 @@
 
   let { job }: { job: Job } = $props();
   let showPicker = $state(false);
+  let pickerThenCompose = $state(false);
+  let uploadingTranscript = $state(false);
+  async function generateWithoutProject() {
+    uploadingTranscript = true;
+    try {
+      if (await uploadTranscriptOnly(job, null, null)) await loadBlueprints();
+    } finally {
+      uploadingTranscript = false;
+    }
+  }
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
   let filled = $derived(metaFilled(job.meta));
   // Abierto por defecto mientras no se hayan capturado datos; plegado cuando ya hay.
@@ -100,7 +110,7 @@
 </script>
 
 {#if showPicker}
-  <IurePicker {job} onclose={() => (showPicker = false)} />
+  <IurePicker {job} onclose={() => (showPicker = false)} onsaved={() => { if (pickerThenCompose) { pickerThenCompose = false; loadBlueprints(); } }} />
 {/if}
 
 <div class="card panel">
@@ -211,7 +221,13 @@
             </div>
           {/each}
           {#if !iureTranscriptDoc(job)}
-            <p class="hint">Guarda primero la transcripción en un {app.iureSession?.terminology?.case ?? "proyecto"} con «Guardar en Iurefficient»; después podrás generar aquí con los formatos del despacho.</p>
+            <p class="hint">La instancia genera a partir de un documento suyo: la transcripción se sube primero (a un {app.iureSession?.terminology?.case ?? "proyecto"}, o sin proyecto) y después se elige el formato.</p>
+            <div class="row-actions">
+              <button class="btn sm primary" onclick={() => { pickerThenCompose = true; showPicker = true; }} disabled={uploadingTranscript || !!job.iureUpload}><Icon name="layers" size={13} /> Elegir {app.iureSession?.terminology?.case ?? "proyecto"} y generar</button>
+              <button class="btn sm" onclick={generateWithoutProject} disabled={uploadingTranscript || !!job.iureUpload}>
+                {#if uploadingTranscript}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="upload" size={13} />{/if} Generar sin proyecto
+              </button>
+            </div>
           {:else if blueprints === null}
             <div>
               <button class="btn sm primary" onclick={loadBlueprints} disabled={loadingBlueprints}>
@@ -253,7 +269,7 @@
             <p class="hint">También puedes generar localmente con OpenRouter configurando una llave en Ajustes.</p>
           {:else if hasKey}
             <button class="btn {iureLoggedIn() ? '' : 'primary'}" onclick={() => generateDoc(job, kind)}>
-              <Icon name="sparkles" size={16} /> Generar {kind === "summary" ? "resumen" : "minuta"}
+              <Icon name="sparkles" size={16} /> Generar {kind === "summary" ? "resumen" : "minuta"} con OpenRouter
             </button>
             <p class="hint">Se enviará la transcripción a OpenRouter ({app.settings?.openrouterModel}).</p>
             {#if filled}
@@ -291,6 +307,7 @@
   .engine { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
   .engine-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .composed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .engine .label { display: inline-flex; align-items: center; gap: 6px; }
   .errtxt { color: var(--danger); }
   .bps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }

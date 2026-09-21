@@ -588,7 +588,7 @@ export async function saveToCase(job: Job, caseId: string, caseTitle: string, in
   }
   job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
   try {
-    const transcriptPath = job.result?.outputs.find((o) => o.format === "txt")?.path ?? job.result?.outputs.find((o) => o.format === "srt")?.path ?? null;
+    const transcriptPath = transcriptPathOf(job);
     const res = await api.iureUploadToCase({ jobId: job.id, caseId, files, transcriptPath, hours, hoursDescription: hours ? `Reunión: ${job.name}` : null });
     job.iure = { mode: "case", folder: caseTitle, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), caseId, caseTitle, documents: res.documents, timeEntryId: res.timeEntryId, composed: [] };
     toast(`Guardado en ${caseTitle} (${res.documents.length} documento(s)${res.timeEntryId ? ", horas registradas" : ""})`, "success", 6000);
@@ -627,6 +627,45 @@ export async function saveToCrm(job: Job, kind: IureCrmKind, id: string, name: s
     return true;
   } catch (e) {
     toast(`No se pudo guardar en el CRM: ${e}`, "error", 9000);
+    return false;
+  } finally {
+    job.iureUpload = null;
+  }
+}
+
+/** Ruta local de la transcripción en texto (txt, o srt como respaldo). */
+export function transcriptPathOf(job: Job): string | null {
+  return job.result?.outputs.find((o) => o.format === "txt")?.path ?? job.result?.outputs.find((o) => o.format === "srt")?.path ?? null;
+}
+
+/** Sube únicamente la transcripción a la instancia (a un proyecto o sin proyecto) para poder componer con el motor. */
+export async function uploadTranscriptOnly(job: Job, caseId: string | null, caseTitle: string | null): Promise<boolean> {
+  const path = transcriptPathOf(job);
+  if (!path) {
+    toast("No hay transcripción que subir todavía", "error");
+    return false;
+  }
+  job.iureUpload = { fileName: "", index: 0, totalFiles: 1, sent: 0, total: 0 };
+  try {
+    const res = await api.iureUploadToCase({ jobId: job.id, caseId, files: [path], transcriptPath: path, hours: null, hoursDescription: null });
+    const label = caseTitle ?? "General (sin proyecto)";
+    const prev = job.iure;
+    job.iure = {
+      mode: "case",
+      folder: prev?.mode === "webdav" ? prev.folder : label,
+      webUrl: res.webUrl,
+      files: [...(prev?.files ?? []), ...res.documents.map((d) => d.fileName)],
+      savedAt: Date.now(),
+      caseId: caseId ?? undefined,
+      caseTitle: caseTitle ?? undefined,
+      documents: [...(prev?.documents ?? []).filter((d) => !d.isTranscript), ...res.documents],
+      composed: prev?.composed ?? [],
+      crm: prev?.crm,
+      timeEntryId: prev?.timeEntryId,
+    };
+    return true;
+  } catch (e) {
+    toast(`No se pudo subir la transcripción: ${e}`, "error", 9000);
     return false;
   } finally {
     job.iureUpload = null;

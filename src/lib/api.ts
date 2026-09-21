@@ -294,7 +294,7 @@ export const api = {
   iureSessionStatus: () => invoke<IureSessionStatus>("iure_session_status"),
   iureLogout: () => invoke<void>("iure_logout"),
   iureSearchCases: (query: string) => invoke<IureCase[]>("iure_search_cases", { query }),
-  iureUploadToCase: (req: { jobId: string; caseId: string; files: string[]; transcriptPath: string | null; hours: number | null; hoursDescription: string | null }) =>
+  iureUploadToCase: (req: { jobId: string; caseId: string | null; files: string[]; transcriptPath: string | null; hours: number | null; hoursDescription: string | null }) =>
     invoke<IureCaseUploadResult>("iure_upload_to_case", { request: req }),
   iureAiOptions: (documentId: string) => invoke<IureAiOptions>("iure_ai_options", { documentId }),
   iureCompose: (req: { blueprintId: string; caseId: string | null; sourceDocumentIds: string[]; title: string | null; attendees: string[]; extraInstructions: string | null }) =>

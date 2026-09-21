@@ -698,7 +698,8 @@ async fn iure_search_cases(state: State<'_, AppState>, query: String) -> Result<
 #[serde(rename_all = "camelCase")]
 struct IureCaseUploadRequest {
     job_id: String,
-    case_id: String,
+    /// None = documento sin proyecto (queda en «General»).
+    case_id: Option<String>,
     files: Vec<String>,
     /// Ruta local de la transcripción (para marcarla como fuente de la minuta).
     transcript_path: Option<String>,
@@ -739,7 +740,7 @@ async fn iure_upload_to_case(app: AppHandle, state: State<'_, AppState>, request
         let _ = app.emit("iure-upload-progress", IureUploadProgress { job_id: request.job_id.clone(), file_name: file_name.clone(), index, total_files, sent: 0, total: 0 });
         let is_transcript = request.transcript_path.as_deref() == Some(f.as_str());
         let opts = api::UploadOptions {
-            case_id: Some(request.case_id.clone()),
+            case_id: request.case_id.clone(),
             file_name: Some(file_name.clone()),
             document_type: Some(if is_transcript { "transcript".into() } else { "other".into() }),
             tags: vec!["iuretranscribe".into()],
@@ -748,9 +749,9 @@ async fn iure_upload_to_case(app: AppHandle, state: State<'_, AppState>, request
         let doc = api::upload_document(&sess, &local, &opts).await.map_err(|e| format!("{file_name}: {e:#}"))?;
         documents.push(IureDocRef { id: doc.id, file_name, is_transcript });
     }
-    let time_entry_id = match request.hours {
-        Some(h) if h > 0.0 => Some(
-            api::add_time_entry(&sess, &request.case_id, h, request.hours_description.as_deref().unwrap_or("Reunión transcrita con IureTranscribe"), true, None)
+    let time_entry_id = match (request.hours, request.case_id.as_deref()) {
+        (Some(h), Some(case_id)) if h > 0.0 => Some(
+            api::add_time_entry(&sess, case_id, h, request.hours_description.as_deref().unwrap_or("Reunión transcrita con IureTranscribe"), true, None)
                 .await
                 .map_err(|e| format!("Documentos subidos, pero no se registraron las horas: {e:#}"))?,
         ),

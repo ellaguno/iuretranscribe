@@ -4,7 +4,7 @@
   import { fmtBytes } from "../lib/format";
   import Icon from "./Icon.svelte";
 
-  let { job, onclose }: { job: Job; onclose: () => void } = $props();
+  let { job, onclose, onsaved }: { job: Job; onclose: () => void; onsaved?: () => void } = $props();
 
   type Mode = "case" | "crm" | "webdav";
   let mode = $state<Mode>(iureLoggedIn() ? "case" : "webdav");
@@ -108,7 +108,10 @@
     if (mode === "webdav" && listing) ok = await saveToIurefficient(job, listing.path, includeMedia);
     else if (mode === "case" && selectedCase) ok = await saveToCase(job, selectedCase.id, `${selectedCase.caseNumber} · ${selectedCase.title}`, includeMedia, logHours ? hours : null);
     else if (mode === "crm" && selectedCrm) ok = await saveToCrm(job, selectedCrm.kind, selectedCrm.id, selectedCrm.name, includeMedia, withActivity);
-    if (ok) onclose();
+    if (ok) {
+      onclose();
+      onsaved?.();
+    }
   }
   function baseName(p: string) {
     return p.split(/[\\/]/).pop() ?? p;
