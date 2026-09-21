@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api, type DocKind } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { app, generateDoc, isActive, metaFilled, metaFilledByUser, retranscribe, toast, type Job } from "../lib/state.svelte";
+  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, retranscribe, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -166,6 +166,11 @@
   function openFile(path: string) {
     api.openPath(path).catch((e) => toast(String(e), "error"));
   }
+  let editor = $derived(appStatus("editor"));
+  /** IureEditor abre Markdown, texto y .docx; no tiene sentido ofrecerla para PDF. */
+  function editorCanOpen(path: string) {
+    return /\.(md|markdown|txt|docx)$/i.test(path);
+  }
   function reveal(path: string) {
     api.revealPath(path).catch((e) => toast(String(e), "error"));
   }
@@ -270,6 +275,9 @@
                 <span class="pill success"><Icon name="check" size={11} stroke={3} /> {c.blueprintName}</span>
                 {#if c.localPath}
                   <button class="btn sm" onclick={() => openFile(c.localPath!)}><Icon name="file" size={13} /> Abrir {c.localPath.split(".").pop()?.toUpperCase()}</button>
+                  {#if editorCanOpen(c.localPath)}
+                    <button class="btn sm ghost" title={editor?.installed ? "Abrir con IureEditor" : "IureEditor no está instalada: descargar"} onclick={() => openWithEditor(c.localPath!)}><Icon name="edit" size={13} /> IureEditor</button>
+                  {/if}
                   <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(c.localPath!)}><Icon name="folder" size={13} /></button>
                 {:else if c.documentId}
                   <button class="btn sm ghost" onclick={() => downloadComposed(job, c)}><Icon name="download" size={13} /> Descargar junto a la transcripción</button>
@@ -376,6 +384,7 @@
           <span class="hint" title={doc.path}>Guardado en {doc.path}{filled ? " · con detalles de la reunión" : ""}</span>
           <button class="btn sm ghost" onclick={() => copyDoc(kind)}><Icon name="copy" size={14} /> Copiar</button>
           <button class="btn sm ghost" onclick={() => openFile(doc.path!)}><Icon name="external" size={14} /> Abrir</button>
+          <button class="btn sm ghost" title={editor?.installed ? "Abrir con IureEditor para editarlo y subirlo a Iurefficient" : "IureEditor no está instalada: descargar"} onclick={() => openWithEditor(doc.path!)}><Icon name="edit" size={14} /> IureEditor</button>
           <button class="btn sm ghost" onclick={() => generateDoc(job, kind)} title="Volver a generar"><Icon name="refresh" size={14} /></button>
         </div>
         <div class="md">{@html renderMarkdown(doc.content)}</div>

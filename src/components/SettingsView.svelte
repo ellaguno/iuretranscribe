@@ -1,7 +1,9 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { app, refreshIureSession, saveSettings, toast } from "../lib/state.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { onMount } from "svelte";
+  import { app, refreshApps, refreshIureSession, saveSettings, toast } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
 
   let s = $derived(app.settings!);
@@ -76,10 +78,28 @@
     } else set.add(f);
     saveSettings({ formats: [...set] });
   }
-  async function pickDir() {
-    const dir = await open({ directory: true, title: "Carpeta de salida" });
+  async function pickDir(defaultPath?: string) {
+    const dir = await open({ directory: true, title: "Carpeta de salida", defaultPath });
     if (typeof dir === "string") saveSettings({ outputMode: "custom", outputDir: dir });
   }
+  /** Unidades de IureDav montadas: guardar ahí deja la transcripción directamente en Iurefficient. */
+  let davMounted = $derived(app.davMounts.filter((m) => m.mounted && m.writable));
+  let appsLoading = $state(false);
+  async function loadApps() {
+    appsLoading = true;
+    await refreshApps(true);
+    appsLoading = false;
+  }
+  async function launch(id: "transcribe" | "editor" | "dav") {
+    try {
+      await api.launchApp(id);
+    } catch (e) {
+      toast(String(e), "error", 6000);
+    }
+  }
+  onMount(() => {
+    if (!app.apps || app.apps.some((a) => a.latestVersion === null)) void loadApps();
+  });
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   function debounced(patch: Parameters<typeof saveSettings>[0]) {
     Object.assign(s, patch);
@@ -200,7 +220,16 @@
         {#if s.outputMode === "custom"}
           <div class="row">
             <span class="path" title={s.outputDir ?? ""}>{s.outputDir ?? "(sin elegir)"}</span>
-            <button class="btn sm" onclick={pickDir}><Icon name="folder" size={14} /> Cambiar</button>
+            <button class="btn sm" onclick={() => pickDir()}><Icon name="folder" size={14} /> Cambiar</button>
+          </div>
+        {/if}
+        {#if davMounted.length}
+          <div class="davhint">
+            <Icon name="drive" size={14} />
+            <span class="hint">IureDav tiene montada la unidad {davMounted.map((m) => `«${m.name}»`).join(", ")}: si eliges una carpeta de proyecto dentro de ella, la transcripción queda directamente en Iurefficient.</span>
+            {#each davMounted as m (m.id)}
+              <button class="btn sm" title={m.mountPoint} onclick={() => pickDir(m.mountPoint)}><Icon name="folder" size={14} /> Elegir en {m.name}</button>
+            {/each}
           </div>
         {/if}
       </div>
@@ -295,6 +324,49 @@
   </section>
 
   <section class="card">
+    <div class="iure-head">
+      <h2><Icon name="apps" size={17} /> Apps de Iurefficient</h2>
+      <button class="btn sm ghost" onclick={loadApps} disabled={appsLoading}>{#if appsLoading}<span class="spin"><Icon name="loader" size={14} /></span>{:else}<Icon name="refresh" size={14} />{/if} Actualizar</button>
+    </div>
+    <p class="hint">Las tres apps de escritorio trabajan juntas: IureTranscribe transcribe, IureEditor edita y publica los documentos, IureDav monta los documentos de tu instancia como una unidad local. Comparten la sesión y las contraseñas de aplicación en el llavero del sistema.</p>
+    {#if app.apps}
+      <div class="apps">
+        {#each app.apps as a (a.id)}
+          <div class="appcard" class:me={a.id === "transcribe"}>
+            <div class="apphead">
+              <strong>{a.name}</strong>
+              {#if a.id === "transcribe"}
+                <span class="pill success">esta app · {app.sys?.version}</span>
+              {:else if a.installed}
+                <span class="pill success"><Icon name="check" size={11} stroke={3} /> instalada</span>
+              {:else}
+                <span class="pill">no instalada</span>
+              {/if}
+              {#if a.latestVersion}<span class="hint">última: {a.latestVersion}</span>{/if}
+            </div>
+            <p class="hint">{a.description}</p>
+            <div class="row-actions">
+              {#if a.id !== "transcribe"}
+                {#if a.installed}
+                  <button class="btn sm" onclick={() => launch(a.id)} title={a.path ?? ""}><Icon name="external" size={13} /> Abrir</button>
+                {:else}
+                  <button class="btn sm primary" onclick={() => openUrl(a.downloadUrl)}><Icon name="download" size={13} /> Descargar</button>
+                {/if}
+              {/if}
+              <button class="btn sm ghost" onclick={() => openUrl(`https://github.com/${a.id === "transcribe" ? "ellaguno/iuretranscribe" : a.id === "editor" ? "ellaguno/iureditor" : "ellaguno/iuredav"}`)}><Icon name="globe" size={13} /> Código</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+      {#if app.davMounts.length}
+        <p class="hint"><Icon name="drive" size={13} /> Unidades de IureDav: {app.davMounts.map((m) => `${m.name} → ${m.mountPoint}${m.mounted ? "" : " (sin montar)"}`).join(" · ")}</p>
+      {/if}
+    {:else}
+      <p class="hint"><span class="spin"><Icon name="loader" size={13} /></span> Buscando apps instaladas…</p>
+    {/if}
+  </section>
+
+  <section class="card">
     <h2><Icon name="sun" size={17} /> Apariencia</h2>
     <div class="seg">
       {#each [["system", "Sistema", "monitor"], ["light", "Claro", "sun"], ["dark", "Oscuro", "moon"]] as [id, label, icon]}
@@ -339,4 +411,11 @@
   .seg button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; color: var(--text-2); font-weight: 550; }
   .seg button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
   code { font-family: var(--mono); font-size: 12px; user-select: text; }
+  .davhint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 9px; color: var(--accent); }
+  .davhint .hint { flex: 1; min-width: 200px; }
+  .apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .appcard { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+  .appcard.me { border-color: var(--accent); }
+  .apphead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 </style>

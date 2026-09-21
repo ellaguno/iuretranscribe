@@ -1012,6 +1012,46 @@ async fn iure_upload_to_crm(app: AppHandle, state: State<'_, AppState>, request:
     Ok(IureCrmUploadResult { documents, activity_id, web_url: sess.account().web_url() })
 }
 
+// ---------------------------------------------------------------------------
+// Apps de Iurefficient (IureEditor, IureDav): detección, lanzamiento y enlaces.
+// ---------------------------------------------------------------------------
+
+/// Estado de las tres apps de escritorio (instalada, ruta, última versión en GitHub).
+#[tauri::command]
+async fn apps_status(with_network: bool) -> Vec<iurefficient_connect::apps::AppStatus> {
+    if with_network {
+        iurefficient_connect::apps::status(&iure_user_agent()).await
+    } else {
+        iurefficient_connect::apps::installed()
+    }
+}
+
+/// Abre un archivo con otra app de Iurefficient (p. ej. la minuta con IureEditor).
+#[tauri::command]
+fn open_with_app(app: String, path: String) -> Result<(), String> {
+    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| format!("app desconocida: {app}"))?;
+    iurefficient_connect::apps::open_with(id, std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
+}
+
+/// Lanza otra app de Iurefficient (sin archivo).
+#[tauri::command]
+fn launch_app(app: String) -> Result<(), String> {
+    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| format!("app desconocida: {app}"))?;
+    iurefficient_connect::apps::launch(id, &[]).map_err(|e| format!("{e:#}"))
+}
+
+/// Unidades de IureDav configuradas en este equipo (para sugerirlas como carpeta de salida).
+#[tauri::command]
+fn iuredav_mounts() -> Vec<iurefficient_connect::apps::DavMount> {
+    iurefficient_connect::apps::iuredav_mounts()
+}
+
+/// Argumentos con los que se abrió la app (rutas de archivo o enlaces `iuretranscribe://`).
+#[tauri::command]
+fn launch_args() -> Vec<String> {
+    std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect()
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -1033,12 +1073,34 @@ pub fn run() {
     whisper_rs::install_logging_hooks();
 
     tauri::Builder::default()
+        // Una sola instancia: si el usuario abre otro archivo o un enlace
+        // `iuretranscribe://`, llega a la ventana ya abierta como evento.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            let args: Vec<String> = argv.into_iter().skip(1).filter(|a| !a.starts_with('-')).collect();
+            if !args.is_empty() {
+                let _ = app.emit("launch-args", args);
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Esquema `iuretranscribe://` (en Linux y Windows se registra en tiempo de
+            // ejecución para que también funcione con AppImage y en desarrollo).
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("no se pudo registrar el esquema iuretranscribe://: {e}");
+                }
+            }
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
             let models_dir = data_dir.join("models");
@@ -1111,6 +1173,11 @@ pub fn run() {
             open_path,
             reveal_path,
             read_text_file,
+            apps_status,
+            open_with_app,
+            launch_app,
+            iuredav_mounts,
+            launch_args,
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar IureTranscribe");

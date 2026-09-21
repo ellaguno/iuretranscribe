@@ -1,7 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
+  type AppId,
+  type AppStatus,
+  type DavMount,
   api,
   type IureAiOptions,
   type IureBlueprint,
@@ -163,7 +167,86 @@ export const app = $state({
   iureSession: null as IureSessionStatus | null,
   /** Versión nueva disponible en GitHub, si se detectó. */
   updateNotice: null as { version: string; url: string } | null,
+  /** Apps de Iurefficient en este equipo (null = sin consultar). */
+  apps: null as AppStatus[] | null,
+  /** Unidades de IureDav configuradas en este equipo. */
+  davMounts: [] as DavMount[],
 });
+
+export function appStatus(id: AppId): AppStatus | undefined {
+  return app.apps?.find((a) => a.id === id);
+}
+
+/** Refresca el estado de las apps; con red consulta también la última versión en GitHub. */
+export async function refreshApps(withNetwork: boolean): Promise<void> {
+  try {
+    app.apps = await api.appsStatus(withNetwork);
+  } catch (e) {
+    console.warn("apps_status:", e);
+  }
+  try {
+    app.davMounts = await api.iuredavMounts();
+  } catch {
+    app.davMounts = [];
+  }
+}
+
+/** Abre un archivo con IureEditor; si no está instalada, ofrece descargarla. */
+export async function openWithEditor(path: string): Promise<void> {
+  const ed = appStatus("editor");
+  if (ed && !ed.installed) {
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    const go = await ask("IureEditor no está instalada en este equipo. ¿Abrir la página de descarga?", { title: "IureTranscribe", kind: "info", okLabel: "Descargar", cancelLabel: "Cancelar" });
+    if (go) openUrl(ed.downloadUrl).catch(() => {});
+    return;
+  }
+  try {
+    await api.openWithApp("editor", path);
+  } catch (e) {
+    toast(String(e), "error", 6000);
+  }
+}
+
+/**
+ * Argumentos de arranque o de una segunda instancia: rutas de archivo (se agregan a
+ * la cola) o enlaces `iuretranscribe://` (`transcribe?path=…`, `record`, `settings`).
+ */
+export async function handleLaunchArgs(args: string[]): Promise<void> {
+  const paths: string[] = [];
+  for (const raw of args) {
+    if (!raw) continue;
+    if (raw.startsWith("iuretranscribe:")) {
+      let u: URL;
+      try {
+        u = new URL(raw);
+      } catch {
+        continue;
+      }
+      const action = (u.host || u.pathname.replace(/^\/+/, "")).replace(/\/+$/, "").toLowerCase();
+      if (action === "record" || action === "grabar") app.view = "record";
+      else if (action === "settings" || action === "ajustes") app.view = "settings";
+      else if (action === "models" || action === "modelos") app.view = "models";
+      else {
+        for (const p of u.searchParams.getAll("path")) paths.push(p);
+        if (!u.searchParams.has("path")) app.view = "transcribe";
+      }
+    } else if (/^file:/i.test(raw)) {
+      try {
+        paths.push(decodeURIComponent(new URL(raw).pathname));
+      } catch {
+        /* ignorar */
+      }
+    } else {
+      paths.push(raw);
+    }
+  }
+  if (paths.length) {
+    app.view = "transcribe";
+    const added = await addFiles(paths);
+    // Quien abre con IureTranscribe quiere transcribir: arranca la cola si está libre.
+    if (added.length && !app.running) void startQueue();
+  }
+}
 
 let toastSeq = 0;
 let stopRequested = false;
@@ -326,6 +409,19 @@ export async function init() {
   });
   setInterval(() => (app.now = Date.now()), 1000);
   app.ready = true;
+  // Apps hermanas y unidades de IureDav (sin red); archivos o enlaces con los que se abrió.
+  refreshApps(false);
+  await listen<string[]>("launch-args", (e) => void handleLaunchArgs(e.payload));
+  try {
+    const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+    await onOpenUrl((urls) => void handleLaunchArgs(urls));
+    const current = await getCurrent();
+    if (current?.length) void handleLaunchArgs(current);
+    else void api.launchArgs().then((a) => { if (a.length) void handleLaunchArgs(a); });
+  } catch (e) {
+    console.warn("deep-link:", e);
+    void api.launchArgs().then((a) => { if (a.length) void handleLaunchArgs(a); });
+  }
 }
 
 export async function refreshModels() {

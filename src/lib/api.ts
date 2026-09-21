@@ -182,6 +182,27 @@ export interface ModelInfo {
   path: string;
 }
 
+export type AppId = "transcribe" | "editor" | "dav";
+export interface AppStatus {
+  id: AppId;
+  name: string;
+  description: string;
+  installed: boolean;
+  path: string | null;
+  downloadUrl: string;
+  latestVersion: string | null;
+}
+/** Unidad de IureDav configurada en este equipo. */
+export interface DavMount {
+  id: string;
+  name: string;
+  url: string;
+  user: string;
+  mountPoint: string;
+  mounted: boolean;
+  writable: boolean;
+}
+
 export interface SystemInfo {
   backend: string;
   cpuThreads: number;
@@ -359,6 +380,12 @@ export const api = {
   loadDocuments: (outputDir: string, baseName: string) =>
     invoke<{ summary: DocumentResult | null; minutes: DocumentResult | null }>("load_documents", { outputDir, baseName }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
+  /** Apps de escritorio de Iurefficient: instaladas en este equipo y última versión publicada. */
+  appsStatus: (withNetwork: boolean) => invoke<AppStatus[]>("apps_status", { withNetwork }),
+  openWithApp: (app: AppId, path: string) => invoke<void>("open_with_app", { app, path }),
+  launchApp: (app: AppId) => invoke<void>("launch_app", { app }),
+  iuredavMounts: () => invoke<DavMount[]>("iuredav_mounts"),
+  launchArgs: () => invoke<string[]>("launch_args"),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
 };

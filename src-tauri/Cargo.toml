@@ -1,6 +1,6 @@
 [package]
 name = "iuretranscribe"
-version = "0.4.2"
+version = "0.5.0"
 description = "Transcripción de audio y video con Whisper, con resumen y minuta"
 authors = ["Iurefficient"]
 edition = "2021"
@@ -20,6 +20,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 whisper-rs = { version = "0.16", features = ["log_backend"] }
@@ -37,7 +39,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 
 hound = "3.5"
-iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.3.0" }
+iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.4.2" }
 
 # Captura de audio con cpal en Windows/macOS; en Linux se usa PipeWire/PulseAudio por subproceso.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
