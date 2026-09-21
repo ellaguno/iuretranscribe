@@ -94,7 +94,7 @@
         {#each files as f}<li>{baseName(f)}</li>{/each}
       </ul>
       <label class="check"><input type="checkbox" bind:checked={includeMedia} disabled={uploading} /> Incluir el audio/video original</label>
-      <p class="hint">Un archivo con el mismo nombre en la carpeta se guarda como versión nueva, no como duplicado.</p>
+      <p class="hint">Un archivo con el mismo nombre en la carpeta se guarda como versión nueva, no como duplicado. Si la instancia no admite subtítulos (.srt/.vtt), se suben como .txt.</p>
     </div>
 
     {#if job.iureUpload}

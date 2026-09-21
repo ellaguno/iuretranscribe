@@ -107,6 +107,17 @@ pub struct Uploaded {
     pub remote_path: String,
     /// true = documento nuevo (201), false = versión nueva de uno existente (204).
     pub created: bool,
+    /// El servidor rechazó la extensión original y se subió con este otro nombre.
+    pub renamed_from: Option<String>,
+}
+
+/// Extensiones de subtítulos que las instancias suelen no admitir; se reintentan como `.txt`.
+const SUBTITLE_EXTENSIONS: &[&str] = &["srt", "vtt", "json"];
+
+/// Nombre alternativo cuando la instancia rechaza la extensión: `x.srt` → `x.srt.txt`.
+pub fn fallback_name(name: &str) -> Option<String> {
+    let ext = name.rsplit('.').next()?.to_ascii_lowercase();
+    SUBTITLE_EXTENSIONS.contains(&ext.as_str()).then(|| format!("{name}.txt"))
 }
 
 fn http() -> Result<Client> {
@@ -287,7 +298,11 @@ where
             file_name: name,
             remote_path: percent_decode_str(url.path()).decode_utf8_lossy().trim_start_matches("/webdav/").to_string(),
             created: status == StatusCode::CREATED,
+            renamed_from: None,
         }),
+        StatusCode::FORBIDDEN => Err(anyhow!(
+            "{name}: la instancia rechazó el archivo (403). Suele deberse a que la extensión no está en los tipos permitidos de la instancia, o a falta de permiso en la carpeta."
+        )),
         s => Err(anyhow!("{name}: {}", explain_status(s))),
     }
 }
@@ -393,6 +408,14 @@ mod tests {
         assert_eq!(a.web_url(), "https://demo.iurefficient.com/");
         assert_eq!(a.webdav_url("Clientes/Acme S.A./Proyecto 1").unwrap().as_str(), "https://demo.iurefficient.com/webdav/Clientes/Acme%20S.A./Proyecto%201/");
         assert_eq!(a.file_url("General", "minuta ñ.md").unwrap().as_str(), "https://demo.iurefficient.com/webdav/General/minuta%20%C3%B1.md");
+    }
+
+    #[test]
+    fn fallback_names() {
+        assert_eq!(fallback_name("pavel_final.srt").as_deref(), Some("pavel_final.srt.txt"));
+        assert_eq!(fallback_name("a.VTT").as_deref(), Some("a.VTT.txt"));
+        assert_eq!(fallback_name("resumen.md"), None);
+        assert_eq!(fallback_name("audio.wav"), None);
     }
 
     #[test]

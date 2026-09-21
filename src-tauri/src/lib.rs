@@ -535,15 +535,27 @@ async fn iure_upload(app: AppHandle, state: State<'_, AppState>, request: IureUp
         let app2 = app.clone();
         let job_id = request.job_id.clone();
         let fname = file_name.clone();
-        let mut last = std::time::Instant::now();
-        let res = iurefficient::upload(&acc, &request.folder, &local, None, move |sent, total| {
+        let last = Arc::new(Mutex::new(std::time::Instant::now()));
+        let progress = move |sent: u64, total: u64| {
+            let mut last = last.lock().unwrap();
             if last.elapsed().as_millis() > 120 || sent == total {
-                last = std::time::Instant::now();
+                *last = std::time::Instant::now();
                 let _ = app2.emit("iure-upload-progress", IureUploadProgress { job_id: job_id.clone(), file_name: fname.clone(), index, total_files, sent, total });
             }
-        })
-        .await
-        .map_err(|e| format!("{e:#}"))?;
+        };
+        let res = match iurefficient::upload(&acc, &request.folder, &local, None, progress.clone()).await {
+            Ok(r) => r,
+            // Extensión rechazada (p. ej. .srt): reintenta como .txt para no perder la transcripción.
+            Err(e) if e.to_string().contains("403") => match iurefficient::fallback_name(&file_name) {
+                Some(alt) => {
+                    let mut r = iurefficient::upload(&acc, &request.folder, &local, Some(&alt), progress).await.map_err(|e| format!("{e:#}"))?;
+                    r.renamed_from = Some(file_name.clone());
+                    r
+                }
+                None => return Err(format!("{e:#}")),
+            },
+            Err(e) => return Err(format!("{e:#}")),
+        };
         uploaded.push(res);
     }
     // Recuerda la carpeta para la próxima vez.

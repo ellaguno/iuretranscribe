@@ -542,7 +542,9 @@ export async function saveToIurefficient(job: Job, folder: string, includeMedia:
     job.iure = { folder: res.folder, webUrl: res.webUrl, files: res.uploaded.map((u) => u.fileName), savedAt: Date.now() };
     if (app.settings) app.settings.iureLastFolder = res.folder;
     const versions = res.uploaded.filter((u) => !u.created).length;
+    const renamed = res.uploaded.filter((u) => u.renamedFrom);
     toast(`Guardado en Iurefficient (${res.uploaded.length} archivo(s)${versions ? `, ${versions} como versión nueva` : ""})`, "success", 6000);
+    if (renamed.length) toast(`La instancia no admite ${renamed.map((u) => u.renamedFrom!.split(".").pop()).join("/")}: se guardó como ${renamed.map((u) => u.fileName).join(", ")}`, "info", 9000);
     return true;
   } catch (e) {
     toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);

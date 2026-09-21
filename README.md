@@ -30,7 +30,8 @@ Con la cuenta conectada, cada archivo transcrito tiene el botón **Guardar en
 Iurefficient**: se elige la carpeta del cliente y proyecto (o `General`) y se suben
 la transcripción (SRT/TXT/…), el resumen, la minuta y, opcionalmente, el audio o
 video original. Un archivo con el mismo nombre se guarda como versión nueva, no como
-duplicado, igual que en la aplicación web.
+duplicado, igual que en la aplicación web. Las instancias no admiten `.srt`/`.vtt`
+por defecto: en ese caso se suben como `.txt` (p. ej. `reunion.srt.txt`).
 
 Esta es la fase 0 de la integración, que no requiere cambios en el servidor. El
 conector vive en `src-tauri/src/iurefficient.rs` sin dependencias de Tauri, para

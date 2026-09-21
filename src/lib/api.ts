@@ -55,6 +55,7 @@ export interface IureUploaded {
   fileName: string;
   remotePath: string;
   created: boolean;
+  renamedFrom: string | null;
 }
 
 export interface IureUploadResult {
