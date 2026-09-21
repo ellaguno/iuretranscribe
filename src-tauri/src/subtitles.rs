@@ -8,6 +8,17 @@ pub struct Segment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
+    /// Quién habla (p. ej. «Eduardo» o «Interlocutor»), si se distinguió la fuente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+}
+
+/// Texto del segmento con el hablante como prefijo («Eduardo: …») cuando lo hay.
+pub fn line(s: &Segment) -> String {
+    match s.speaker.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => format!("{n}: {}", s.text.trim()),
+        None => s.text.trim().to_string(),
+    }
 }
 
 fn ts(ms: i64, sep: char) -> String {
@@ -30,7 +41,7 @@ pub fn to_srt(segments: &[Segment]) -> String {
             i + 1,
             ts(s.start_ms, ','),
             ts(s.end_ms, ','),
-            s.text.trim()
+            line(s)
         ));
     }
     out
@@ -43,7 +54,7 @@ pub fn to_vtt(segments: &[Segment]) -> String {
             "{} --> {}\n{}\n\n",
             ts(s.start_ms, '.'),
             ts(s.end_ms, '.'),
-            s.text.trim()
+            line(s)
         ));
     }
     out
@@ -52,7 +63,7 @@ pub fn to_vtt(segments: &[Segment]) -> String {
 pub fn to_txt(segments: &[Segment]) -> String {
     let mut out = String::new();
     for s in segments {
-        out.push_str(s.text.trim());
+        out.push_str(&line(s));
         out.push('\n');
     }
     out
@@ -62,7 +73,7 @@ pub fn to_txt(segments: &[Segment]) -> String {
 pub fn to_plain(segments: &[Segment]) -> String {
     segments
         .iter()
-        .map(|s| s.text.trim())
+        .map(line)
         .filter(|t| !t.is_empty())
         .collect::<Vec<_>>()
         .join(" ")

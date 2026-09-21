@@ -436,7 +436,7 @@ struct StartRecordingInfo {
 }
 
 #[tauri::command]
-async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<StartRecordingInfo, String> {
+async fn start_recording(app: AppHandle, state: State<'_, AppState>, speakers: Option<[String; 2]>) -> Result<StartRecordingInfo, String> {
     let settings = state.settings.lock().unwrap().clone();
     let mut live_note = None;
     let live = if settings.live_transcription {
@@ -459,6 +459,7 @@ async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<S
                 on_segment: Arc::new(move |seg| {
                     let _ = app.emit("live-segment", seg);
                 }),
+                speakers: if settings.speaker_split { speakers } else { None },
             })
         } else {
             live_note = Some("Transcripción en vivo desactivada: el modelo seleccionado no está descargado.".into());
@@ -859,6 +860,36 @@ async fn iure_summary_via_chat(state: State<'_, AppState>, request: IureSummaryR
     Ok(DocumentResult { kind: "summary".into(), content, path: path.to_string_lossy().into_owned() })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IureCommitments {
+    commitments: Vec<api::Commitment>,
+    case_id: Option<String>,
+}
+
+/// Compromisos detectados por la instancia en una minuta (documento de la instancia).
+#[tauri::command]
+async fn iure_commitments(state: State<'_, AppState>, document_id: String) -> Result<IureCommitments, String> {
+    let sess = iure_session(&state).await?;
+    let (commitments, case_id) = api::commitments(&sess, &document_id).await.map_err(|e| format!("{e:#}"))?;
+    Ok(IureCommitments { commitments, case_id })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureApplyRequest {
+    document_id: String,
+    case_id: Option<String>,
+    commitments: Vec<api::Commitment>,
+}
+
+/// Convierte compromisos en tareas del proyecto. Devuelve cuántas se crearon.
+#[tauri::command]
+async fn iure_apply_commitments(state: State<'_, AppState>, request: IureApplyRequest) -> Result<u64, String> {
+    let sess = iure_session(&state).await?;
+    api::apply_commitments(&sess, &request.document_id, &request.commitments, request.case_id.as_deref()).await.map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 async fn iure_crm_search(state: State<'_, AppState>, kind: String, query: String) -> Result<Vec<api::CrmItem>, String> {
     let sess = iure_session(&state).await?;
@@ -997,6 +1028,8 @@ pub fn run() {
             iure_compose_status,
             iure_download_document,
             iure_summary_via_chat,
+            iure_commitments,
+            iure_apply_commitments,
             iure_crm_search,
             iure_upload_to_crm,
             list_audio_devices,

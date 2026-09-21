@@ -403,12 +403,30 @@ function stopPolling() {
   pollTimer = undefined;
 }
 
+/** Nombres para etiquetar [micrófono, sistema] a partir de tu nombre y los asistentes capturados. */
+export function speakerNames(): [string, string] {
+  const s = app.settings;
+  const me = (s?.myName?.trim() || app.iureSession?.name?.trim() || "Yo").split(" ").slice(0, 2).join(" ");
+  const others = app.pendingMeta.participants
+    .split(/\n|,|;/)
+    .map((x) => x.trim())
+    .filter((x) => x && !x.toLowerCase().includes(me.toLowerCase().split(" ")[0]));
+  const other = others.length === 1 ? others[0].split(" ").slice(0, 2).join(" ") : "Interlocutor";
+  return [me, other];
+}
+
+/** Texto de un segmento con el hablante como prefijo. */
+export function segmentLine(s: Segment): string {
+  return s.speaker ? `${s.speaker}: ${s.text.trim()}` : s.text.trim();
+}
+
 export async function startRecording() {
   if (app.recordingBusy || app.recording.active) return;
   app.recordingBusy = true;
   app.liveSegments = [];
   try {
-    const info = await api.startRecording();
+    const split = !!app.settings?.speakerSplit && !!app.settings?.recordMic && !!app.settings?.recordSystem;
+    const info = await api.startRecording(split ? speakerNames() : null);
     if (info.liveNote) toast(info.liveNote, "info", 7000);
     await pollRecording();
     if (!pollTimer) pollTimer = setInterval(pollRecording, 250);

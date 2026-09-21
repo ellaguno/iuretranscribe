@@ -1,6 +1,6 @@
 [package]
 name = "iuretranscribe"
-version = "0.3.5"
+version = "0.4.0"
 description = "Transcripción de audio y video con Whisper, con resumen y minuta"
 authors = ["Iurefficient"]
 edition = "2021"

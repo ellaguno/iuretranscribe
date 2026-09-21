@@ -46,6 +46,15 @@ pub struct LiveOptions {
     /// Segundos de audio por bloque (latencia aproximada).
     pub chunk_secs: f64,
     pub on_segment: Arc<dyn Fn(Segment) + Send + Sync>,
+    /// Nombres de [micrófono, sistema]: si está, cada fuente se transcribe por separado
+    /// y los segmentos llevan hablante («quién habló»).
+    pub speakers: Option<[String; 2]>,
+}
+
+/// Bloque de audio para la transcripción en vivo: `source` 0 = micrófono, 1 = sistema, 2 = mezcla.
+struct LiveChunk {
+    source: usize,
+    samples: Vec<f32>,
 }
 
 pub struct StartOptions {
@@ -148,9 +157,13 @@ impl Recorder {
 
         // Transcripción en vivo: el mezclador reenvía el audio mezclado a un hilo aparte.
         self.live_pending.store(0, Ordering::Relaxed);
+        let split = opts.live.as_ref().map(|l| l.speakers.is_some()).unwrap_or(false) && sources[MIC] && sources[SYS];
         let (live_tx, live_worker) = match opts.live {
-            Some(live) => {
-                let (ltx, lrx) = mpsc::channel::<Vec<f32>>();
+            Some(mut live) => {
+                if !split {
+                    live.speakers = None;
+                }
+                let (ltx, lrx) = mpsc::channel::<LiveChunk>();
                 let pending = self.live_pending.clone();
                 let err_slot = self.last_error.clone();
                 (Some(ltx), Some(std::thread::spawn(move || live_worker(lrx, live, pending, err_slot))))
@@ -164,7 +177,7 @@ impl Recorder {
             let stop = stop.clone();
             let levels = [self.levels[0].clone(), self.levels[1].clone()];
             let err_slot = self.last_error.clone();
-            std::thread::spawn(move || mixer(rx, &path, sources, stop, levels, err_slot, live_tx))
+            std::thread::spawn(move || mixer(rx, &path, sources, stop, levels, err_slot, live_tx, split))
         };
         *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), mixer: Some(mixer), workers, children, live_worker, live: is_live });
         Ok(path)
@@ -233,7 +246,8 @@ fn mixer(
     stop: Arc<AtomicBool>,
     levels: [Arc<AtomicU32>; 2],
     err_slot: Arc<Mutex<Option<String>>>,
-    live_tx: Option<mpsc::Sender<Vec<f32>>>,
+    live_tx: Option<mpsc::Sender<LiveChunk>>,
+    split: bool,
 ) -> Result<u64> {
     let spec = hound::WavSpec { channels: 1, sample_rate: TARGET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!("No se pudo crear {}: {e}", path.display()))?;
@@ -242,15 +256,36 @@ fn mixer(
     let mut written = 0u64;
     let to_i16 = |s: f32| (s.clamp(-1.0, 1.0) * 32767.0) as i16;
     let stall_limit = TARGET_RATE as usize * 2; // 2 s sin datos de la otra fuente → no esperar más
-    let mut live_buf: Vec<f32> = Vec::new();
-    // Escribe una muestra mezclada al WAV y la acumula para la transcripción en vivo.
-    macro_rules! put {
-        ($s:expr) => {{
+    // Audio para la transcripción en vivo: mezcla (índice 2) o por fuente (0 y 1).
+    let mut live_bufs: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    // Igual que `put!`, pero conociendo cada fuente (para «quién habló»).
+    macro_rules! put_pair {
+        ($a:expr, $b:expr) => {{
+            let a: f32 = $a;
+            let b: f32 = $b;
+            writer.write_sample(to_i16(a + b))?;
+            written += 1;
+            if live_tx.is_some() {
+                if split {
+                    live_bufs[MIC].push(a);
+                    live_bufs[SYS].push(b);
+                } else {
+                    live_bufs[2].push(a + b);
+                }
+            }
+        }};
+    }
+    macro_rules! put_one {
+        ($i:expr, $s:expr) => {{
             let v: f32 = $s;
             writer.write_sample(to_i16(v))?;
             written += 1;
             if live_tx.is_some() {
-                live_buf.push(v);
+                if split {
+                    live_bufs[$i].push(v);
+                } else {
+                    live_bufs[2].push(v);
+                }
             }
         }};
     }
@@ -278,38 +313,42 @@ fn mixer(
         if alive[MIC] && alive[SYS] {
             let n = queues[MIC].len().min(queues[SYS].len());
             for _ in 0..n {
-                put!(queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0));
+                put_pair!(queues[MIC].pop_front().unwrap_or(0.0), queues[SYS].pop_front().unwrap_or(0.0));
             }
             // Si una fuente se estanca (p. ej. loopback sin reproducción), no retener la otra.
             for i in [MIC, SYS] {
                 let other = 1 - i;
                 if queues[other].is_empty() && queues[i].len() > stall_limit {
                     while let Some(s) = queues[i].pop_front() {
-                        put!(s);
+                        put_one!(i, s);
                     }
                 }
             }
         } else {
-            for q in queues.iter_mut() {
-                while let Some(s) = q.pop_front() {
-                    put!(s);
+            for i in [MIC, SYS] {
+                while let Some(s) = queues[i].pop_front() {
+                    put_one!(i, s);
                 }
             }
         }
         if let Some(tx) = live_tx.as_ref() {
-            if !live_buf.is_empty() {
-                let _ = tx.send(std::mem::take(&mut live_buf));
+            for (i, b) in live_bufs.iter_mut().enumerate() {
+                if !b.is_empty() {
+                    let _ = tx.send(LiveChunk { source: i, samples: std::mem::take(b) });
+                }
             }
         }
     }
     // Vacía lo que quede, mezclando con silencio.
     let n = queues[MIC].len().max(queues[SYS].len());
     for _ in 0..n {
-        put!(queues[MIC].pop_front().unwrap_or(0.0) + queues[SYS].pop_front().unwrap_or(0.0));
+        put_pair!(queues[MIC].pop_front().unwrap_or(0.0), queues[SYS].pop_front().unwrap_or(0.0));
     }
     if let Some(tx) = live_tx.as_ref() {
-        if !live_buf.is_empty() {
-            let _ = tx.send(live_buf);
+        for (i, b) in live_bufs.iter_mut().enumerate() {
+            if !b.is_empty() {
+                let _ = tx.send(LiveChunk { source: i, samples: std::mem::take(b) });
+            }
         }
     }
     drop(live_tx); // cierra el canal: el hilo en vivo transcribe lo pendiente y termina
@@ -344,36 +383,49 @@ fn rms(buf: &[f32]) -> f32 {
     (buf.iter().map(|s| s * s).sum::<f32>() / buf.len().max(1) as f32).sqrt()
 }
 
-/// Recibe el audio mezclado, lo corta en bloques y los transcribe conforme llegan.
-fn live_worker(rx: Receiver<Vec<f32>>, live: LiveOptions, pending: Arc<AtomicU32>, err_slot: Arc<Mutex<Option<String>>>) {
+/// Estado de transcripción en vivo de una fuente (o de la mezcla).
+struct LiveStream {
+    buf: Vec<f32>,
+    offset: u64,
+    prompt: String,
+    speaker: Option<String>,
+}
+
+/// Recibe el audio (mezclado o por fuente), lo corta en bloques y los transcribe conforme llegan.
+fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU32>, err_slot: Arc<Mutex<Option<String>>>) {
     let rate = TARGET_RATE as usize;
     let chunk = (live.chunk_secs.max(3.0) * rate as f64) as usize;
-    let mut buf: Vec<f32> = Vec::new();
-    let mut offset: u64 = 0; // muestras ya procesadas
-    let mut prompt = String::new();
+    let names = live.speakers.clone();
+    let mut streams: Vec<LiveStream> = (0..3)
+        .map(|i| LiveStream {
+            buf: Vec::new(),
+            offset: 0,
+            prompt: String::new(),
+            speaker: names.as_ref().and_then(|n| n.get(i).cloned()).filter(|n| !n.trim().is_empty()),
+        })
+        .collect();
     let mut opts = live.options.clone();
     let sink: EventSink = Arc::new(|_: EngineEvent| {});
     let cancel = Arc::new(AtomicBool::new(false));
 
-    let mut process = |piece: Vec<f32>, offset: &mut u64, prompt: &mut String| {
-        let offset_ms = (*offset * 1000 / rate as u64) as i64;
-        *offset += piece.len() as u64;
+    let mut process = |st: &mut LiveStream, piece: Vec<f32>| {
+        let offset_ms = (st.offset * 1000 / rate as u64) as i64;
+        st.offset += piece.len() as u64;
         if rms(&piece) < 0.002 {
             return; // silencio: evita alucinaciones
         }
-        opts.initial_prompt = if prompt.is_empty() { None } else { Some(prompt.clone()) };
+        opts.initial_prompt = if st.prompt.is_empty() { None } else { Some(st.prompt.clone()) };
         match live.engine.transcribe_pcm(sink.clone(), &opts, &piece, cancel.clone(), true) {
             Ok(out) => {
                 let mut text = String::new();
                 for seg in out.segments {
                     text.push(' ');
                     text.push_str(&seg.text);
-                    (live.on_segment)(Segment { start_ms: seg.start_ms + offset_ms, end_ms: seg.end_ms + offset_ms, text: seg.text });
+                    (live.on_segment)(Segment { start_ms: seg.start_ms + offset_ms, end_ms: seg.end_ms + offset_ms, text: seg.text, speaker: st.speaker.clone() });
                 }
                 let text = text.trim().to_string();
                 if !text.is_empty() {
-                    let tail: String = text.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
-                    *prompt = tail;
+                    st.prompt = text.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
                 }
             }
             Err(e) => {
@@ -382,23 +434,29 @@ fn live_worker(rx: Receiver<Vec<f32>>, live: LiveOptions, pending: Arc<AtomicU32
             }
         }
     };
+    let pending_of = |streams: &[LiveStream]| (streams.iter().map(|s| s.buf.len()).max().unwrap_or(0) * 10 / rate) as u32;
 
     loop {
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(data) => buf.extend(data),
+            Ok(c) => streams[c.source.min(2)].buf.extend(c.samples),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        pending.store((buf.len() * 10 / rate) as u32, Ordering::Relaxed);
-        while buf.len() >= chunk {
-            let cut = find_cut(&buf, chunk, rate * 2);
-            let piece: Vec<f32> = buf.drain(..cut).collect();
-            process(piece, &mut offset, &mut prompt);
-            pending.store((buf.len() * 10 / rate) as u32, Ordering::Relaxed);
+        pending.store(pending_of(&streams), Ordering::Relaxed);
+        for st in streams.iter_mut() {
+            while st.buf.len() >= chunk {
+                let cut = find_cut(&st.buf, chunk, rate * 2);
+                let piece: Vec<f32> = st.buf.drain(..cut).collect();
+                process(st, piece);
+            }
         }
+        pending.store(pending_of(&streams), Ordering::Relaxed);
     }
-    if buf.len() >= rate {
-        process(std::mem::take(&mut buf), &mut offset, &mut prompt);
+    for st in streams.iter_mut() {
+        if st.buf.len() >= rate {
+            let piece = std::mem::take(&mut st.buf);
+            process(st, piece);
+        }
     }
     pending.store(0, Ordering::Relaxed);
 }
@@ -637,6 +695,7 @@ mod tests {
             },
             chunk_secs: 6.0,
             on_segment: Arc::new(move |s| sink_got.lock().unwrap().push(s)),
+            speakers: None,
         };
         let (tx, rx) = mpsc::channel();
         let pending = Arc::new(AtomicU32::new(0));
@@ -644,7 +703,7 @@ mod tests {
         let errs2 = errs.clone();
         let h = std::thread::spawn(move || live_worker(rx, live, pending, errs));
         for chunk in samples.chunks(TARGET_RATE as usize / 4) {
-            tx.send(chunk.to_vec()).unwrap();
+            tx.send(LiveChunk { source: 2, samples: chunk.to_vec() }).unwrap();
         }
         drop(tx);
         h.join().unwrap();

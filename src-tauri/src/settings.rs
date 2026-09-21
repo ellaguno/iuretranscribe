@@ -56,6 +56,10 @@ pub struct Settings {
     pub iure_last_folder: Option<String>,
     /// Al guardar en un proyecto, generar la minuta con el motor de Iurefficient automáticamente.
     pub iure_auto_compose: bool,
+    /// Al grabar micrófono y sistema, transcribir cada fuente por separado («quién habló»).
+    pub speaker_split: bool,
+    /// Nombre del usuario para etiquetar el micrófono.
+    pub my_name: String,
 }
 
 impl Default for Settings {
@@ -91,6 +95,8 @@ impl Default for Settings {
             iure_upload_media: true,
             iure_last_folder: None,
             iure_auto_compose: true,
+            speaker_split: true,
+            my_name: String::new(),
         }
     }
 }

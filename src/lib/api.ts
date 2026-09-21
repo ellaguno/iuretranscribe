@@ -31,6 +31,8 @@ export interface Settings {
   iureUploadMedia: boolean;
   iureLastFolder: string | null;
   iureAutoCompose: boolean;
+  speakerSplit: boolean;
+  myName: string;
 }
 
 export interface IureEntry {
@@ -203,6 +205,17 @@ export interface Segment {
   startMs: number;
   endMs: number;
   text: string;
+  /** Quién habla, cuando la grabación distinguió micrófono y sistema. */
+  speaker?: string | null;
+}
+
+export interface IureCommitment {
+  title: string;
+  description: string | null;
+  assigneeName: string | null;
+  assignedToId: string | null;
+  dueDate: string | null;
+  dueHint: string | null;
 }
 
 export interface OutputFile {
@@ -305,11 +318,14 @@ export const api = {
     invoke<string>("iure_download_document", { request: { documentId, targetDir, baseName } }),
   iureSummaryViaChat: (documentId: string, outputDir: string, baseName: string) =>
     invoke<DocumentResult>("iure_summary_via_chat", { request: { documentId, outputDir, baseName } }),
+  iureCommitments: (documentId: string) => invoke<{ commitments: IureCommitment[]; caseId: string | null }>("iure_commitments", { documentId }),
+  iureApplyCommitments: (documentId: string, caseId: string | null, commitments: IureCommitment[]) =>
+    invoke<number>("iure_apply_commitments", { request: { documentId, caseId, commitments } }),
   iureCrmSearch: (kind: IureCrmKind, query: string) => invoke<IureCrmItem[]>("iure_crm_search", { kind, query }),
   iureUploadToCrm: (req: { jobId: string; kind: IureCrmKind; id: string; files: string[]; activitySubject: string | null; activityDescription: string | null; durationMinutes: number | null }) =>
     invoke<IureCrmUploadResult>("iure_upload_to_crm", { request: req }),
   listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
-  startRecording: () => invoke<StartRecordingInfo>("start_recording"),
+  startRecording: (speakers: [string, string] | null) => invoke<StartRecordingInfo>("start_recording", { speakers }),
   stopRecording: () => invoke<RecordingResult>("stop_recording"),
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   systemInfo: () => invoke<SystemInfo>("system_info"),

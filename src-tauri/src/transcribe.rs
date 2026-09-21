@@ -175,7 +175,7 @@ impl Engine {
                 let sink = sink.clone();
                 let job_id = job_id.clone();
                 params.set_segment_callback_safe_lossy(move |d: whisper_rs::SegmentCallbackData| {
-                    let seg = Segment { start_ms: d.start_timestamp * 10, end_ms: d.end_timestamp * 10, text: d.text.trim().to_string() };
+                    let seg = Segment { start_ms: d.start_timestamp * 10, end_ms: d.end_timestamp * 10, text: d.text.trim().to_string(), speaker: None };
                     sink(EngineEvent::Segment(SegmentEvent { job_id: job_id.clone(), segment: seg }));
                 });
             }
@@ -208,7 +208,7 @@ impl Engine {
             if live && (seg.no_speech_probability() > 0.7 || is_non_speech_marker(&text)) {
                 continue;
             }
-            segments.push(Segment { start_ms: seg.start_timestamp() * 10, end_ms: seg.end_timestamp() * 10, text });
+            segments.push(Segment { start_ms: seg.start_timestamp() * 10, end_ms: seg.end_timestamp() * 10, text, speaker: None });
         }
         let detected_language = {
             let id = state.full_lang_id_from_state();

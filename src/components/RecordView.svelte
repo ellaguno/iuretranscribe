@@ -132,6 +132,14 @@
       </div>
       <div class="switchrow">
         <div>
+          <span class="label">Distinguir quién habla (tú / interlocutor)</span>
+          <p class="hint">Con micrófono y sistema activos, cada fuente se transcribe por separado y los segmentos llevan nombre. Tu nombre:</p>
+          <input class="input small" placeholder={app.iureSession?.name ?? "Tu nombre"} value={s.myName} disabled={rec.active} oninput={(e) => saveSettings({ myName: (e.target as HTMLInputElement).value })} />
+        </div>
+        <button class="switch" class:on={s.speakerSplit && s.recordMic && s.recordSystem} aria-label="Quién habla" disabled={rec.active || !s.recordMic || !s.recordSystem} onclick={() => saveSettings({ speakerSplit: !s.speakerSplit })}></button>
+      </div>
+      <div class="switchrow">
+        <div>
           <span class="label">Transcribir en vivo mientras grabo</span>
           <p class="hint">
             Procesa el audio en bloques de {Math.round(s.liveChunkSecs)} s con el modelo {model?.name ?? "seleccionado"}{model && !model.downloaded ? " (no descargado)" : ""}.
@@ -199,7 +207,7 @@
             <p class="hint">{rec.active ? "Esperando el primer bloque de audio…" : "Aquí aparecerá el texto conforme se grabe."}</p>
           {:else}
             {#each app.liveSegments as seg, i (i)}
-              <div class="seg"><span class="ts">{fmtTimestamp(seg.startMs)}</span><span>{seg.text}</span></div>
+              <div class="seg"><span class="ts">{fmtTimestamp(seg.startMs)}</span><span>{#if seg.speaker}<span class="spk" class:other={seg.speaker === "Interlocutor"}>{seg.speaker}</span> {/if}{seg.text}</span></div>
             {/each}
           {/if}
         </div>
@@ -235,6 +243,8 @@
   .livebox { max-height: 320px; min-height: 90px; user-select: text; }
   .seg { display: grid; grid-template-columns: 58px 1fr; gap: 10px; padding: 4px 0; border-bottom: 1px dashed var(--border); line-height: 1.5; }
   .ts { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+  .spk { display: inline-block; padding: 0 6px; margin-right: 2px; border-radius: 6px; font-size: 12px; font-weight: 650; background: var(--accent-soft); color: var(--accent); }
+  .spk.other { background: var(--warn-soft); color: var(--warn); }
   .livetag { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; color: var(--accent); font-weight: 600; }
   section { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
   section h2 { display: flex; align-items: center; gap: 8px; }

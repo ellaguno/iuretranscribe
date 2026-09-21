@@ -8,8 +8,64 @@
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
   import IurePicker from "./IurePicker.svelte";
-  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose, summaryWithIurefficient, uploadTranscriptOnly } from "../lib/state.svelte";
-  import type { IureBlueprint } from "../lib/api";
+  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, notify, pollCompose, segmentLine, summaryWithIurefficient, term, uploadTranscriptOnly } from "../lib/state.svelte";
+  import type { IureBlueprint, IureCase, IureCommitment } from "../lib/api";
+  import type { ComposedDoc } from "../lib/state.svelte";
+
+  // ---- Compromisos → tareas
+  let commitFor = $state<string | null>(null); // documentId de la minuta cuyos compromisos se muestran
+  let commitments = $state<(IureCommitment & { include: boolean })[]>([]);
+  let commitCaseId = $state<string | null>(null);
+  let commitLoading = $state(false);
+  let commitApplying = $state(false);
+  let commitError = $state("");
+  let commitDone = $state<number | null>(null);
+  let caseQuery = $state("");
+  let caseResults = $state<IureCase[]>([]);
+  let caseTimer: ReturnType<typeof setTimeout> | undefined;
+  async function loadCommitments(documentId: string) {
+    commitFor = documentId;
+    commitLoading = true;
+    commitError = "";
+    commitDone = null;
+    try {
+      const r = await api.iureCommitments(documentId);
+      commitments = r.commitments.map((c) => ({ ...c, include: true }));
+      commitCaseId = r.caseId ?? job.iure?.caseId ?? null;
+      if (!commitments.length) commitError = "La instancia no detectó compromisos en esta minuta.";
+    } catch (e) {
+      commitError = String(e);
+    } finally {
+      commitLoading = false;
+    }
+  }
+  async function applyCommitments() {
+    if (!commitFor) return;
+    const items = commitments.filter((c) => c.include && c.title.trim()).map(({ include, ...c }) => c);
+    if (!items.length) return;
+    commitApplying = true;
+    commitError = "";
+    try {
+      const n = await api.iureApplyCommitments(commitFor, commitCaseId, items);
+      commitDone = n;
+      toast(`${n} tarea(s) creadas en Iurefficient`, "success", 7000);
+      notify("IureTranscribe", `${n} tarea(s) creadas en Iurefficient`);
+    } catch (e) {
+      commitError = String(e);
+    } finally {
+      commitApplying = false;
+    }
+  }
+  function onCaseQuery() {
+    clearTimeout(caseTimer);
+    caseTimer = setTimeout(async () => {
+      try {
+        caseResults = await api.iureSearchCases(caseQuery);
+      } catch {
+        caseResults = [];
+      }
+    }, 350);
+  }
 
   let blueprints = $state<IureBlueprint[] | null>(null);
   let loadingBlueprints = $state(false);
@@ -98,7 +154,7 @@
   });
 
   async function copyText() {
-    const text = (job.result ? job.result.segments : job.liveSegments).map((s) => s.text.trim()).filter(Boolean).join("\n");
+    const text = (job.result ? job.result.segments : job.liveSegments).map(segmentLine).filter(Boolean).join("\n");
     await navigator.clipboard.writeText(text);
     toast("Texto copiado al portapapeles", "success", 2000);
   }
@@ -191,9 +247,9 @@
         </div>
       {:else}
         {#each segments as s, i (i)}
-          <div class="seg">
+          <div class="seg" class:mine={s.speaker && i > 0 && segments[i - 1].speaker === s.speaker}>
             <span class="ts">{fmtTimestamp(s.startMs)}</span>
-            <span class="txt">{s.text}</span>
+            <span class="txt">{#if s.speaker}<span class="spk" class:other={s.speaker === "Interlocutor"}>{s.speaker}</span> {/if}{s.text}</span>
           </div>
         {/each}
       {/if}
@@ -219,6 +275,9 @@
                   <button class="btn sm ghost" onclick={() => downloadComposed(job, c)}><Icon name="download" size={13} /> Descargar junto a la transcripción</button>
                 {/if}
                 {#if c.link}<button class="btn sm ghost" title={job.iure?.caseId ? "Documentos del proyecto" : "Documentos → General (sin proyecto)"} onclick={() => openUrl(c.link!)}><Icon name="external" size={13} /> Ver en Iurefficient</button>{/if}
+                {#if c.documentId && kind === "minutes"}
+                  <button class="btn sm {commitFor === c.documentId ? 'ghost' : 'primary'}" onclick={() => loadCommitments(c.documentId!)} disabled={commitLoading}><Icon name="check" size={13} /> Compromisos → tareas</button>
+                {/if}
               {:else if c.error}
                 <span class="pill danger">{c.blueprintName}: {c.error}</span>
               {:else}
@@ -226,6 +285,48 @@
               {/if}
             </div>
           {/each}
+          {#if commitFor && kind === "minutes"}
+            <div class="commits">
+              <div class="engine-head">
+                <span class="label"><Icon name="list" size={14} /> Compromisos detectados</span>
+                <button class="btn icon ghost" onclick={() => (commitFor = null)} aria-label="Cerrar"><Icon name="x" size={14} /></button>
+              </div>
+              {#if commitLoading}
+                <p class="hint"><span class="spin"><Icon name="loader" size={13} /></span> Leyendo la minuta…</p>
+              {:else}
+                {#if commitError}<p class="hint errtxt">{commitError}</p>{/if}
+                {#each commitments as c, i (i)}
+                  <div class="commit" class:off={!c.include}>
+                    <input type="checkbox" bind:checked={c.include} />
+                    <input class="input" bind:value={c.title} placeholder="Título de la tarea" />
+                    <input class="input who" bind:value={c.assigneeName} placeholder={c.assignedToId ? "Responsable" : "Responsable (no identificado)"} title={c.assignedToId ? "Usuario de la instancia identificado" : "Sin usuario identificado: la tarea se creará sin responsable"} />
+                    <input class="input date" type="date" bind:value={c.dueDate} title={c.dueHint ?? ""} />
+                  </div>
+                {/each}
+                {#if commitments.length}
+                  {#if !commitCaseId}
+                    <div class="field">
+                      <span class="label">Las tareas se crean en un {term("case").toLowerCase()}: elige uno</span>
+                      <input class="input" placeholder="Buscar {term('case').toLowerCase()}…" bind:value={caseQuery} oninput={onCaseQuery} />
+                      {#if caseResults.length}
+                        <div class="cases">
+                          {#each caseResults.slice(0, 8) as cs (cs.id)}
+                            <button class="btn sm ghost" onclick={() => { commitCaseId = cs.id; caseResults = []; caseQuery = `${cs.caseNumber} · ${cs.title}`; }}>{cs.caseNumber} · {cs.title}</button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                  <div class="row-actions">
+                    <button class="btn sm primary" onclick={applyCommitments} disabled={commitApplying || !commitCaseId || !commitments.some((c) => c.include && c.title.trim())}>
+                      {#if commitApplying}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="check" size={13} />{/if} Crear {commitments.filter((c) => c.include && c.title.trim()).length} tarea(s) en Iurefficient
+                    </button>
+                    {#if commitDone !== null}<span class="pill success">{commitDone} creadas</span>{/if}
+                  </div>
+                {/if}
+              {/if}
+            </div>
+          {/if}
           {#if !iureTranscriptDoc(job)}
             <p class="hint">La instancia genera a partir de un documento suyo: la transcripción se sube primero (a un {app.iureSession?.terminology?.case ?? "proyecto"}, o sin proyecto) y después se elige el formato.</p>
             <div class="row-actions">
@@ -325,7 +426,16 @@
   .engine { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
   .engine-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .composed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .spk { display: inline-block; padding: 0 6px; margin-right: 2px; border-radius: 6px; font-size: 12px; font-weight: 650; background: var(--accent-soft); color: var(--accent); }
+  .spk.other { background: var(--warn-soft); color: var(--warn); }
+  .seg.mine .spk { visibility: hidden; position: absolute; }
+  .commits { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+  .commit { display: grid; grid-template-columns: auto 1fr 180px 150px; gap: 6px; align-items: center; }
+  .commit.off { opacity: 0.5; }
+  .commit input[type="checkbox"] { accent-color: var(--accent); }
+  .commit .input { padding: 5px 8px; font-size: 13px; }
+  .cases { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
   .engine .label { display: inline-flex; align-items: center; gap: 6px; }
   .errtxt { color: var(--danger); }
   .bps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }

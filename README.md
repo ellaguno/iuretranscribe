@@ -14,7 +14,12 @@ línea de comandos con una interfaz gráfica.
   detalles de la reunión (participantes, fecha, lugar, notas) capturables en
   cualquier momento.
 - Grabación integrada del micrófono y del audio del sistema (videollamadas,
-  reuniones en el navegador) con transcripción automática al detener.
+  reuniones en el navegador) con transcripción en vivo y, si ambas fuentes están
+  activas, **quién habló**: cada fuente se transcribe por separado y los segmentos
+  llevan tu nombre o «Interlocutor».
+- Con la minuta generada por Iurefficient, **compromisos → tareas**: la app lee los
+  compromisos que detecta la instancia, permite corregir responsable y fecha, y los
+  crea como tareas del proyecto.
 - Aceleración por GPU según la variante: CUDA (NVIDIA, Linux/Windows), Vulkan
   (AMD, Intel o NVIDIA, Linux/Windows) o Metal (Apple Silicon). La variante CPU
   funciona en cualquier equipo.
