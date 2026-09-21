@@ -8,7 +8,7 @@
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
   import IurePicker from "./IurePicker.svelte";
-  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose, uploadTranscriptOnly } from "../lib/state.svelte";
+  import { composeWithIurefficient, downloadComposed, iureConfigured, iureLoggedIn, iureTranscriptDoc, iureWaitAiOptions, pollCompose, summaryWithIurefficient, uploadTranscriptOnly } from "../lib/state.svelte";
   import type { IureBlueprint } from "../lib/api";
 
   let blueprints = $state<IureBlueprint[] | null>(null);
@@ -34,8 +34,21 @@
   const isResumen = (b: { genre: string; name?: string; blueprintName?: string }) => /resumen|summary|síntesis|sintesis/i.test(label(b));
   function blueprintsFor(kind: "summary" | "minutes"): IureBlueprint[] {
     if (!blueprints) return [];
-    const f = kind === "minutes" ? blueprints.filter(isMinuta) : blueprints.filter(isResumen);
-    return f.length ? f : blueprints;
+    if (kind === "summary") return blueprints.filter(isResumen);
+    const f = blueprints.filter(isMinuta);
+    return f.length ? f : blueprints.filter((b) => !isResumen(b));
+  }
+  let summaryTarget = $state<"summary" | "minutes" | null>(null);
+  async function generateWithoutProjectFor(kind: "summary" | "minutes") {
+    uploadingTranscript = true;
+    try {
+      if (await uploadTranscriptOnly(job, null, null)) {
+        if (kind === "summary") await summaryWithIurefficient(job);
+        else await loadBlueprints();
+      }
+    } finally {
+      uploadingTranscript = false;
+    }
   }
   function composedFor(kind: "summary" | "minutes") {
     const all = job.iure?.composed ?? [];
@@ -51,14 +64,7 @@
   let showPicker = $state(false);
   let pickerThenCompose = $state(false);
   let uploadingTranscript = $state(false);
-  async function generateWithoutProject() {
-    uploadingTranscript = true;
-    try {
-      if (await uploadTranscriptOnly(job, null, null)) await loadBlueprints();
-    } finally {
-      uploadingTranscript = false;
-    }
-  }
+
   let tab = $state<"transcript" | "summary" | "minutes">("transcript");
   let filled = $derived(metaFilled(job.meta));
   // Abierto por defecto mientras no se hayan capturado datos; plegado cuando ya hay.
@@ -110,7 +116,7 @@
 </script>
 
 {#if showPicker}
-  <IurePicker {job} onclose={() => (showPicker = false)} onsaved={() => { if (pickerThenCompose) { pickerThenCompose = false; loadBlueprints(); } }} />
+  <IurePicker {job} onclose={() => (showPicker = false)} onsaved={() => { if (summaryTarget === "summary") { summaryTarget = null; pickerThenCompose = false; summaryWithIurefficient(job); } else if (pickerThenCompose) { pickerThenCompose = false; summaryTarget = null; loadBlueprints(); } }} />
 {/if}
 
 <div class="card panel">
@@ -223,10 +229,22 @@
           {#if !iureTranscriptDoc(job)}
             <p class="hint">La instancia genera a partir de un documento suyo: la transcripción se sube primero (a un {app.iureSession?.terminology?.case ?? "proyecto"}, o sin proyecto) y después se elige el formato.</p>
             <div class="row-actions">
-              <button class="btn sm primary" onclick={() => { pickerThenCompose = true; showPicker = true; }} disabled={uploadingTranscript || !!job.iureUpload}><Icon name="layers" size={13} /> Elegir {app.iureSession?.terminology?.case ?? "proyecto"} y generar</button>
-              <button class="btn sm" onclick={generateWithoutProject} disabled={uploadingTranscript || !!job.iureUpload}>
+              <button class="btn sm primary" onclick={() => { pickerThenCompose = kind === "minutes"; summaryTarget = kind; showPicker = true; }} disabled={uploadingTranscript || !!job.iureUpload}><Icon name="layers" size={13} /> Elegir {app.iureSession?.terminology?.case ?? "proyecto"} y generar</button>
+              <button class="btn sm" onclick={() => generateWithoutProjectFor(kind)} disabled={uploadingTranscript || !!job.iureUpload}>
                 {#if uploadingTranscript}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="upload" size={13} />{/if} Generar sin proyecto
               </button>
+            </div>
+          {:else if kind === "summary"}
+            <p class="hint">Usa la IA de la instancia con tus instrucciones de resumen (Ajustes → Resumen y minuta) y descuenta de la cuota de IA del plan.</p>
+            <div class="row-actions">
+              <button class="btn sm primary" onclick={() => summaryWithIurefficient(job)} disabled={job.summary.status === "loading"}>
+                {#if job.summary.status === "loading"}<span class="spin"><Icon name="loader" size={13} /></span>{:else}<Icon name="sparkles" size={13} />{/if} {job.summary.status === "done" ? "Volver a generar el resumen" : "Generar resumen con Iurefficient"}
+              </button>
+              {#if blueprints !== null && blueprintsFor("summary").length}
+                {#each blueprintsFor("summary") as b (b.id)}
+                  <button class="btn sm" onclick={() => composeWithIurefficient(job, b)}><Icon name="doc" size={13} /> Formato «{b.name}»</button>
+                {/each}
+              {/if}
             </div>
           {:else if blueprints === null}
             <div>

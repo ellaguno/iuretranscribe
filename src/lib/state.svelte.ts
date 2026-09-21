@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
@@ -164,6 +165,19 @@ export const app = $state({
 
 let toastSeq = 0;
 let stopRequested = false;
+let notifyOk: boolean | null = null;
+
+/** Notificación del sistema (además del aviso dentro de la app), si el usuario lo permite. */
+export async function notify(title: string, body: string) {
+  try {
+    if (notifyOk === null) {
+      notifyOk = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+    }
+    if (notifyOk && !document.hasFocus()) sendNotification({ title, body });
+  } catch {
+    /* sin notificaciones del sistema */
+  }
+}
 
 export function toast(text: string, kind: Toast["kind"] = "info", ms = 4500) {
   const id = ++toastSeq;
@@ -483,15 +497,18 @@ export async function startQueue() {
   }
   app.running = true;
   stopRequested = false;
+  let done = 0;
   try {
     while (!stopRequested) {
       const job = app.jobs.find((j) => j.status === "queued");
       if (!job) break;
       await runJob(job);
+      done++;
     }
   } finally {
     app.running = false;
   }
+  if (done > 0 && !stopRequested) notify("IureTranscribe", done === 1 ? "Transcripción terminada" : `${done} transcripciones terminadas`);
 }
 
 export function stopQueue() {
@@ -716,6 +733,28 @@ export async function composeWithIurefficient(job: Job, blueprint: { id: string;
   }
 }
 
+/** Resumen con la IA de la instancia usando el prompt de resumen de la app (sin llave local). */
+export async function summaryWithIurefficient(job: Job): Promise<boolean> {
+  const transcript = iureTranscriptDoc(job);
+  if (!transcript) {
+    toast("Primero sube la transcripción a Iurefficient", "error");
+    return false;
+  }
+  if (job.summary.status === "loading") return false;
+  job.summary = { status: "loading" };
+  try {
+    const res = await api.iureSummaryViaChat(transcript.id, job.result!.outputDir, job.result!.baseName);
+    job.summary = { status: "done", content: res.content, path: res.path };
+    toast("Resumen generado con la IA de Iurefficient", "success", 6000);
+    notify("IureTranscribe", `Resumen generado con Iurefficient para ${job.name}`);
+    return true;
+  } catch (e) {
+    job.summary = { status: "error", error: String(e) };
+    toast(`No se pudo generar el resumen en Iurefficient: ${e}`, "error", 9000);
+    return false;
+  }
+}
+
 /** Tras guardar en un proyecto: lanza el formato de minuta sugerido por la instancia. */
 export async function autoComposeMinutes(job: Job) {
   const transcript = iureTranscriptDoc(job);
@@ -756,10 +795,12 @@ export function pollCompose(job: Job) {
           c.documentId = st.documentId;
           c.link = st.link ? (st.link.startsWith("http") ? st.link : job.iure.webUrl.replace(/\/$/, "") + st.link) : null;
           toast(`«${c.blueprintName}» generada en Iurefficient`, "success", 7000);
+          notify("IureTranscribe", `«${c.blueprintName}» generada en Iurefficient para ${job.name}`);
           downloadComposed(job, c);
         } else if (st.state === "FAILURE" || st.state === "REVOKED") {
           c.error = st.error ?? "La generación falló";
           toast(`Iurefficient no pudo generar «${c.blueprintName}»: ${c.error}`, "error", 9000);
+          notify("IureTranscribe", `Iurefficient no pudo generar «${c.blueprintName}»`);
         } else if (Date.now() - c.startedAt > 30 * 60 * 1000) {
           c.error = "Sin respuesta de la instancia tras 30 minutos";
         }

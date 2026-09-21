@@ -303,6 +303,8 @@ export const api = {
   /** `baseName` sin extensión: el backend añade la del documento real (.md, .docx…). */
   iureDownloadDocument: (documentId: string, targetDir: string, baseName: string) =>
     invoke<string>("iure_download_document", { request: { documentId, targetDir, baseName } }),
+  iureSummaryViaChat: (documentId: string, outputDir: string, baseName: string) =>
+    invoke<DocumentResult>("iure_summary_via_chat", { request: { documentId, outputDir, baseName } }),
   iureCrmSearch: (kind: IureCrmKind, query: string) => invoke<IureCrmItem[]>("iure_crm_search", { kind, query }),
   iureUploadToCrm: (req: { jobId: string; kind: IureCrmKind; id: string; files: string[]; activitySubject: string | null; activityDescription: string | null; durationMinutes: number | null }) =>
     invoke<IureCrmUploadResult>("iure_upload_to_crm", { request: req }),

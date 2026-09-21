@@ -832,6 +832,33 @@ async fn iure_download_document(state: State<'_, AppState>, request: IureDownloa
     Ok(path.to_string_lossy().into_owned())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IureSummaryRequest {
+    document_id: String,
+    output_dir: String,
+    base_name: String,
+}
+
+/// Resumen con la IA de la instancia, usando las instrucciones de resumen de la app
+/// como `system_prompt` y la transcripción subida como documento de contexto.
+#[tauri::command]
+async fn iure_summary_via_chat(state: State<'_, AppState>, request: IureSummaryRequest) -> Result<DocumentResult, String> {
+    let sess = iure_session(&state).await?;
+    let prompt = state.settings.lock().unwrap().summary_prompt.clone();
+    let content = api::global_chat(
+        &sess,
+        "Resume la transcripción del documento adjunto siguiendo tus instrucciones. Responde sólo con el resumen en Markdown.",
+        Some(&prompt),
+        &[request.document_id.clone()],
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))?;
+    let path = PathBuf::from(&request.output_dir).join(format!("{}_resumen.md", request.base_name));
+    std::fs::write(&path, format!("{content}\n")).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
+    Ok(DocumentResult { kind: "summary".into(), content, path: path.to_string_lossy().into_owned() })
+}
+
 #[tauri::command]
 async fn iure_crm_search(state: State<'_, AppState>, kind: String, query: String) -> Result<Vec<api::CrmItem>, String> {
     let sess = iure_session(&state).await?;
@@ -909,6 +936,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
@@ -968,6 +996,7 @@ pub fn run() {
             iure_compose,
             iure_compose_status,
             iure_download_document,
+            iure_summary_via_chat,
             iure_crm_search,
             iure_upload_to_crm,
             list_audio_devices,
