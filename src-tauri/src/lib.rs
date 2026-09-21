@@ -689,6 +689,41 @@ async fn iure_logout(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Garantiza una contraseña de aplicación WebDAV: si no hay ninguna en el llavero ni en
+/// los ajustes, la crea con la sesión iniciada (a nombre de esta máquina) y la guarda.
+#[tauri::command]
+async fn iure_ensure_webdav_password(state: State<'_, AppState>) -> Result<bool, String> {
+    let acc = iure_account(&state)?;
+    let existing = secrets::leer(&acc, secrets::Kind::WebDav).ok().flatten().filter(|p| !p.trim().is_empty())
+        .or_else(|| Some(state.settings.lock().unwrap().iure_app_password.clone()).filter(|p| !p.trim().is_empty()));
+    if existing.is_some() {
+        return Ok(false);
+    }
+    let sess = iure_session(&state).await?;
+    let host = hostname_label();
+    let created = api::create_webdav_token(&sess, &format!("IureTranscribe en {host}"), None).await.map_err(|e| format!("{e:#}"))?;
+    if secrets::guardar(&acc, secrets::Kind::WebDav, &created.secret).is_err() {
+        // Sin llavero: se conserva en los ajustes.
+        let mut s = state.settings.lock().unwrap();
+        s.iure_app_password = created.secret.clone();
+        let _ = s.save(&state.settings_path);
+    }
+    {
+        let mut s = state.settings.lock().unwrap();
+        s.iure_app_password = created.secret;
+    }
+    Ok(true)
+}
+
+fn hostname_label() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_string()))
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "este equipo".into())
+}
+
 #[tauri::command]
 async fn iure_search_cases(state: State<'_, AppState>, query: String) -> Result<Vec<api::CaseSummary>, String> {
     let sess = iure_session(&state).await?;
@@ -1021,6 +1056,7 @@ pub fn run() {
             iure_login,
             iure_session_status,
             iure_logout,
+            iure_ensure_webdav_password,
             iure_search_cases,
             iure_upload_to_case,
             iure_ai_options,

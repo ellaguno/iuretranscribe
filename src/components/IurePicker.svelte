@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type IureCase, type IureCrmItem, type IureCrmKind, type IureListing } from "../lib/api";
-  import { app, iureConfigured, iureFilesFor, iureLoggedIn, saveSettings, saveToCase, saveToCrm, saveToIurefficient, suggestedHours, term, type Job } from "../lib/state.svelte";
+  import { app, iureConfigured, iureFilesFor, iureLoggedIn, saveSettings, saveToCase, saveToCrm, saveToIurefficient, suggestedHours, term, toast, type Job } from "../lib/state.svelte";
   import { fmtBytes } from "../lib/format";
   import Icon from "./Icon.svelte";
 
@@ -16,6 +16,24 @@
 
   // --- carpeta WebDAV
   let listing = $state<IureListing | null>(null);
+  async function openFolderMode() {
+    if (!iureConfigured() && iureLoggedIn()) {
+      loading = true;
+      try {
+        const created = await api.iureEnsureWebdavPassword();
+        app.settings = await api.getSettings();
+        if (created) toast("Se creó una contraseña de aplicación WebDAV con tu sesión", "success", 5000);
+      } catch (e) {
+        error = `No se pudo preparar el acceso WebDAV: ${e}`;
+        loading = false;
+        mode = "webdav";
+        return;
+      } finally {
+        loading = false;
+      }
+    }
+    mode = "webdav";
+  }
   let crumbs = $derived((listing?.path ?? "").split("/").filter(Boolean));
   async function go(path: string) {
     loading = true;
@@ -131,8 +149,8 @@
     <div class="modes">
       <button class:active={mode === "case"} onclick={() => (mode = "case")} disabled={!iureLoggedIn()} title={iureLoggedIn() ? "" : "Inicia sesión en Ajustes"}><Icon name="layers" size={14} /> {term("case")}</button>
       <button class:active={mode === "crm"} onclick={() => (mode = "crm")} disabled={!iureLoggedIn() || !app.iureSession?.crm} title={app.iureSession?.crm ? "" : "El CRM no está disponible en tu instancia o sesión"}><Icon name="sparkles" size={14} /> CRM</button>
-      {#if iureConfigured()}
-        <button class:active={mode === "webdav"} onclick={() => (mode = "webdav")}><Icon name="folder" size={14} /> Carpeta</button>
+      {#if iureConfigured() || iureLoggedIn()}
+        <button class:active={mode === "webdav"} onclick={openFolderMode} title="Cualquier carpeta del árbol de documentos (WebDAV)"><Icon name="folder" size={14} /> Carpeta</button>
       {/if}
     </div>
 

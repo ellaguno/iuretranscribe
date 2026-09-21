@@ -166,6 +166,11 @@
         </div>
       </div>
       <div class="row">
+        {#if app.iureSession?.loggedIn && !s.iureAppPassword}
+          <button class="btn sm primary" onclick={async () => { try { await api.iureEnsureWebdavPassword(); app.settings = await api.getSettings(); toast("Contraseña de aplicación creada y guardada en el llavero", "success"); } catch (e) { toast(String(e), "error", 8000); } }}>
+            <Icon name="key" size={14} /> Crear con mi sesión
+          </button>
+        {/if}
         <button class="btn sm" onclick={testIure} disabled={iureTesting || !s.iureDomain || !s.iureEmail || !s.iureAppPassword}>
           {#if iureTesting}<span class="spin"><Icon name="loader" size={15} /></span>{:else}<Icon name="check" size={15} />{/if} Probar acceso WebDAV
         </button>

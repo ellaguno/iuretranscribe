@@ -306,6 +306,8 @@ export const api = {
     invoke<IureLoginResult>("iure_login", { password, totpCode: totpCode ?? null, totpToken: totpToken ?? null }),
   iureSessionStatus: () => invoke<IureSessionStatus>("iure_session_status"),
   iureLogout: () => invoke<void>("iure_logout"),
+  /** true si creó una contraseña de aplicación nueva con la sesión; false si ya había. */
+  iureEnsureWebdavPassword: () => invoke<boolean>("iure_ensure_webdav_password"),
   iureSearchCases: (query: string) => invoke<IureCase[]>("iure_search_cases", { query }),
   iureUploadToCase: (req: { jobId: string; caseId: string | null; files: string[]; transcriptPath: string | null; hours: number | null; hoursDescription: string | null }) =>
     invoke<IureCaseUploadResult>("iure_upload_to_case", { request: req }),
