@@ -696,6 +696,7 @@ async fn iure_login(state: State<'_, AppState>, password: String, totp_code: Opt
         },
     };
     persist_session(&acc, &sess);
+    let _ = iurefficient_connect::account::set_active(&acc, "IureTranscribe");
     *state.iure_session.lock().await = Some(Arc::new(sess));
     let name = user.name.clone().or_else(|| user.extra.get("full_name").and_then(|v| v.as_str()).map(str::to_string)).or(Some(user.email.clone()));
     Ok(IureLoginResult { logged_in: true, requires_totp: false, totp_token: None, name })
@@ -739,6 +740,7 @@ async fn iure_logout(state: State<'_, AppState>) -> Result<(), String> {
     }
     if let Ok(acc) = iure_account(&state) {
         let _ = secrets::borrar(&acc, secrets::Kind::Session);
+        let _ = iurefficient_connect::account::clear_active(&acc);
     }
     Ok(())
 }
@@ -1135,6 +1137,17 @@ pub fn run() {
             let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
             let mut settings = Settings::load(&settings_path);
+            // Sin cuenta configurada: si otra app de Iurefficient (IureDav, IureEditor)
+            // ya inició sesión en este equipo, se toma su instancia y correo; la sesión
+            // y la contraseña WebDAV están en el llavero compartido.
+            if settings.iure_domain.trim().is_empty() || settings.iure_email.trim().is_empty() {
+                if let Some(a) = iurefficient_connect::account::active() {
+                    log::info!("cuenta de Iurefficient tomada de la cuenta activa compartida (la dejó {})", a.app);
+                    settings.iure_domain = a.domain;
+                    settings.iure_email = a.email;
+                    let _ = settings.save(&settings_path);
+                }
+            }
             if settings.iure_app_password.is_empty() {
                 if let Ok(acc) = Account::new(&settings.iure_domain, &settings.iure_email) {
                     if let Ok(Some(p)) = secrets::leer(&acc, secrets::Kind::WebDav) {
