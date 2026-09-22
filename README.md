@@ -154,6 +154,44 @@ lo avisan en la barra lateral con un enlace a la versión sin GPU; si ni siquier
 el modo procesador arranca, la transcripción se detiene con ese mismo aviso en
 lugar de cerrar la aplicación sin rastro.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+*Firma de código gratuita proporcionada por SignPath.io, con certificado de SignPath
+Foundation. Es lo que hace que Windows muestre un editor conocido en lugar de la
+advertencia de SmartScreen.*
+
+- **Committers and reviewers:** Eduardo Llaguno ([@ellaguno](https://github.com/ellaguno)).
+- **Approvers:** Eduardo Llaguno ([@ellaguno](https://github.com/ellaguno)).
+- Every Windows release (CPU, Vulkan and CUDA variants) is built from this
+  repository by GitHub Actions (`.github/workflows/build.yml`), submitted to
+  SignPath from that workflow and approved manually before it is signed. Only the
+  installers published on the
+  [releases page](https://github.com/ellaguno/iuretranscribe/releases) are signed.
+
+### Privacy policy
+
+This program will not transfer any information to other networked systems unless
+specifically requested by the user or the person installing or operating it.
+
+Transcription runs entirely on the user's computer with [whisper.cpp](https://github.com/ggml-org/whisper.cpp);
+audio never leaves the machine. Specifically, IureTranscribe connects only to:
+
+- `huggingface.co`, when the user asks to download a Whisper model in the Models
+  section;
+- the Iurefficient instance that the user configures, and only when the user signs
+  in, saves a transcript there or asks that instance to write a summary or minutes;
+- [OpenRouter](https://openrouter.ai), only if the user enters their own API key and
+  asks for a summary or minutes with it; the transcript text is sent for that
+  request only;
+- `api.github.com`, once at start-up, to check whether a newer release exists. It
+  can be turned off in Settings (« Avisar de versiones nuevas »).
+
+It collects no telemetry and no usage statistics. Credentials are stored in the
+operating system keychain, never in configuration files.
+
 ## Licencia
 
 MIT.
