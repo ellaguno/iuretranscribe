@@ -381,7 +381,7 @@
       <button class="switch" class:on={s.checkUpdates} aria-label="Avisar de versiones nuevas" onclick={() => saveSettings({ checkUpdates: !s.checkUpdates })}></button>
     </div>
     <div><button class="btn sm" onclick={() => import("../lib/updater").then((m) => m.checkForUpdates(false))}><Icon name="refresh" size={14} /> Buscar actualizaciones ahora</button></div>
-    <p class="hint">Modelos en: <code>{app.sys?.modelsDir}</code><br />Ajustes en: <code>{app.sys?.settingsPath}</code></p>
+    <p class="hint">Modelos en: <code>{app.sys?.modelsDir}</code><br />Ajustes en: <code>{app.sys?.settingsPath}</code>{#if app.sys?.logPath}<br />Registro en: <code>{app.sys.logPath}</code>{/if}</p>
   </section>
 </div>
 

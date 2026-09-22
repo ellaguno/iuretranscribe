@@ -50,6 +50,7 @@ struct SystemInfo {
     version: &'static str,
     /// Identificador de plataforma y variante para el actualizador (p. ej. `linux-x86_64-cuda`).
     update_target: String,
+    log_path: Option<String>,
     supported_extensions: &'static [&'static str],
 }
 
@@ -134,6 +135,7 @@ fn system_info(state: State<'_, AppState>) -> SystemInfo {
         recordings_dir: recordings_dir(&state).to_string_lossy().into_owned(),
         version: env!("CARGO_PKG_VERSION"),
         update_target: update_target(),
+        log_path: LOG_PATH.get().and_then(|p| p.as_ref()).map(|p| p.to_string_lossy().into_owned()),
         supported_extensions: audio::SUPPORTED_EXTENSIONS,
     }
 }
@@ -1091,8 +1093,68 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Ruta del registro de esta ejecución (None si no se pudo crear).
+static LOG_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// Escribe cada línea del registro en stderr y en el archivo de registro.
+struct LogTee(std::fs::File);
+
+impl std::io::Write for LogTee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        self.0.write_all(buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stderr().flush();
+        self.0.flush()
+    }
+}
+
+/// Registro en archivo además de stderr. En Windows y en los lanzadores de escritorio
+/// nadie ve stderr, y sin esto un cierre inesperado no dejaba rastro. Se reinicia en
+/// cada arranque; el anterior queda como `iuretranscribe.prev.log`.
+fn init_logging() {
+    let env = env_logger::Env::default().default_filter_or("info,whisper_rs=warn");
+    let mut builder = env_logger::Builder::from_env(env);
+    let path = dirs::data_dir().map(|d| d.join("com.iurefficient.iuretranscribe").join("logs"));
+    let file = path.and_then(|dir| {
+        std::fs::create_dir_all(&dir).ok()?;
+        let log = dir.join("iuretranscribe.log");
+        let _ = std::fs::rename(&log, dir.join("iuretranscribe.prev.log"));
+        std::fs::File::create(&log).ok().map(|f| (log, f))
+    });
+    match file {
+        Some((log, f)) => {
+            builder.target(env_logger::Target::Pipe(Box::new(LogTee(f))));
+            let _ = LOG_PATH.set(Some(log));
+        }
+        None => {
+            let _ = LOG_PATH.set(None);
+        }
+    }
+    builder.init();
+    // Con `panic = "abort"` el gancho sí se ejecuta antes de abortar: queda el motivo.
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("la aplicación se cerró por un error interno: {info}");
+    }));
+    log::info!(
+        "IureTranscribe {} ({}, {} {}) — registro en {}",
+        env!("CARGO_PKG_VERSION"),
+        transcribe::backend_name(),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        LOG_PATH.get().and_then(|p| p.as_ref()).map(|p| p.display().to_string()).unwrap_or_else(|| "(sólo stderr)".into())
+    );
+}
+
 pub fn run() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,whisper_rs=warn")).init();
+    // El proceso hijo de la sonda de GPU no toca el archivo de registro del padre.
+    if std::env::args().nth(1).as_deref() == Some("--gpu-probe") {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,whisper_rs=warn")).init();
+    } else {
+        init_logging();
+    }
     whisper_rs::install_logging_hooks();
     // Proceso hijo de la sonda de GPU: no arranca la interfaz.
     if let Some(code) = gpu::handle_probe_args() {

@@ -121,6 +121,12 @@ en Ajustes → Apariencia → «Avisar de versiones nuevas».
 | --- | --- | --- | --- |
 | Modelos | `~/.local/share/com.iurefficient.iuretranscribe/models` | `%APPDATA%\com.iurefficient.iuretranscribe\models` | `~/Library/Application Support/com.iurefficient.iuretranscribe/models` |
 | Ajustes | `~/.config/com.iurefficient.iuretranscribe/settings.json` | `%APPDATA%\com.iurefficient.iuretranscribe\settings.json` | `~/Library/Application Support/com.iurefficient.iuretranscribe/settings.json` |
+| Registro | `~/.local/share/com.iurefficient.iuretranscribe/logs/iuretranscribe.log` | `%APPDATA%\com.iurefficient.iuretranscribe\logs\iuretranscribe.log` | `~/Library/Application Support/com.iurefficient.iuretranscribe/logs/iuretranscribe.log` |
+
+El registro se reinicia en cada arranque y el anterior queda como
+`iuretranscribe.prev.log`. Si la app se cierra sola, lo último que escribió está
+ahí; la ruta exacta se muestra en Ajustes. Con la variable `RUST_LOG=debug` se
+escribe más detalle.
 
 En Linux, la primera vez importa `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` de
 `~/.config/transcribe/config` si existen (el archivo del script original).

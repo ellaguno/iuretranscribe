@@ -607,7 +607,14 @@ fn spawn_source(
         });
         chosen.or_else(|| host.default_input_device()).ok_or_else(|| anyhow!("No hay micrófono disponible"))?
     };
-    let supported = device.default_input_config().map_err(|e| anyhow!("El dispositivo no admite captura: {e}"))?;
+    // Loopback WASAPI: el dispositivo de salida no tiene «configuración de entrada»
+    // (cpal responde «Device does not support input»); se captura con su formato de
+    // mezcla, y cpal activa el loopback al abrir un flujo de entrada sobre él.
+    let supported = if idx == SYS {
+        device.default_output_config().map_err(|e| anyhow!("La salida no admite captura (loopback): {e}"))?
+    } else {
+        device.default_input_config().map_err(|e| anyhow!("El micrófono no admite captura: {e}"))?
+    };
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.config();
     let channels = config.channels.max(1) as usize;

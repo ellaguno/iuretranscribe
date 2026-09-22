@@ -75,7 +75,8 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.name }}
+          # v2: invalida las cachés compiladas con -march=native (ver GGML_NATIVE abajo).
+          key: ${{ matrix.name }}-v2
 
       - name: Dependencias de Linux (Tauri)
         if: startsWith(matrix.os, 'ubuntu')
@@ -175,6 +176,13 @@ jobs:
           # compila igual, pero la app sólo podrá avisar de versiones nuevas.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Sin optimizar para la CPU del runner: ggml compila por defecto con
+          # -march=native (o su equivalente en MSVC), y los runners de GitHub tienen
+          # AVX-512, así que el binario moría con «instrucción ilegal» al cargar el
+          # modelo en cualquier CPU sin AVX-512: laptops, miniPCs y máquinas virtuales.
+          # Con OFF, ggml usa AVX2/FMA/F16C, que tiene todo x86 desde 2013. En Apple
+          # Silicon el runner y los usuarios comparten arquitectura y se deja nativo.
+          GGML_NATIVE: ${{ matrix.name == 'macos-arm64' && 'ON' || 'OFF' }}
         with:
           projectPath: .
           args: ${{ matrix.args }} ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}

@@ -209,6 +209,8 @@ export interface SystemInfo {
   platform: string;
   modelsDir: string;
   settingsPath: string;
+  /** Archivo de registro de esta ejecución (null si no se pudo crear). */
+  logPath: string | null;
   ffmpegAvailable: boolean;
   recordingsDir: string;
   version: string;
