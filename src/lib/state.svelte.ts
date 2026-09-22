@@ -24,6 +24,7 @@ import {
   type Settings,
   type SystemInfo,
   type TranscriptResult,
+  type GpuNotice,
 } from "./api";
 
 export type View = "transcribe" | "record" | "models" | "settings";
@@ -167,6 +168,8 @@ export const app = $state({
   iureSession: null as IureSessionStatus | null,
   /** Versión nueva disponible en GitHub, si se detectó. */
   updateNotice: null as { version: string; url: string } | null,
+  /** La GPU de esta máquina no sirve para esta variante (CUDA/Vulkan); se sugiere la versión sin GPU. */
+  gpuNotice: null as GpuNotice | null,
   /** Apps de Iurefficient en este equipo (null = sin consultar). */
   apps: null as AppStatus[] | null,
   /** Unidades de IureDav configuradas en este equipo. */
@@ -404,6 +407,14 @@ export async function init() {
   });
   await listen<Segment>("live-segment", (e) => {
     app.liveSegments.push(e.payload);
+  });
+  await listen<string>("gpu-probe", () => {
+    toast("Comprobando si la tarjeta gráfica sirve para transcribir… puede tardar un momento.", "info", 8000);
+  });
+  await listen<GpuNotice>("gpu-notice", (e) => {
+    const first = !app.gpuNotice;
+    app.gpuNotice = e.payload;
+    if (first) toast(e.payload.message, e.payload.level === "none" ? "error" : "info", 15000);
   });
   await getCurrentWebview().onDragDropEvent((event) => {
     const t = event.payload.type;

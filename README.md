@@ -145,6 +145,15 @@ lo que ocupa casi todo el tamaño y no se puede omitir. En Linux CUDA se
 distribuye sólo como `.deb` (el AppImage no puede empaquetar esas librerías).
 Para un instalador ligero con GPU, usa la variante Vulkan.
 
+Si no sabes qué tarjeta gráfica tiene el equipo, instala la variante sin GPU
+(`linux-x64` o `windows-x64`): funciona en cualquier máquina. Las variantes CUDA
+y Vulkan comprueban la GPU la primera vez que van a transcribir, en un proceso
+aparte (`--gpu-probe`), porque un driver que no sirve hace que ggml aborte el
+proceso en vez de devolver un error. Si la GPU falla, siguen con el procesador y
+lo avisan en la barra lateral con un enlace a la versión sin GPU; si ni siquiera
+el modo procesador arranca, la transcripción se detiene con ese mismo aviso en
+lugar de cerrar la aplicación sin rastro.
+
 ## Licencia
 
 MIT.

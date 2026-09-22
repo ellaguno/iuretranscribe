@@ -225,6 +225,34 @@ fn is_non_speech_marker(text: &str) -> bool {
     (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')')) || t.starts_with('♪')
 }
 
+/// Variantes cuyo backend puede abortar el proceso (no devolver error) si el driver
+/// de la máquina no sirve: se comprueban en un proceso hijo antes de usarlas.
+pub fn is_gpu_variant() -> bool {
+    cfg!(feature = "cuda") || cfg!(feature = "vulkan")
+}
+
+/// Sonda de compatibilidad: carga el modelo, inicializa el backend y transcribe un
+/// segundo de silencio. Se ejecuta en un proceso hijo (`--gpu-probe`) porque si el
+/// driver de GPU falla, ggml aborta el proceso en lugar de devolver un error.
+pub fn probe(model_path: &Path, use_gpu: bool) -> Result<()> {
+    let mut params = WhisperContextParameters::default();
+    params.use_gpu(use_gpu);
+    params.flash_attn(use_gpu);
+    let ctx = WhisperContext::new_with_params(model_path.to_str().ok_or_else(|| anyhow!("ruta de modelo no válida"))?, params)
+        .map_err(|e| anyhow!("No se pudo cargar el modelo: {e}"))?;
+    let mut state = ctx.create_state().map_err(|e| anyhow!("No se pudo inicializar whisper: {e}"))?;
+    let mut full = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    full.set_n_threads(2);
+    full.set_language(Some("es"));
+    full.set_print_special(false);
+    full.set_print_progress(false);
+    full.set_print_realtime(false);
+    full.set_print_timestamps(false);
+    let silence = vec![0.0f32; crate::audio::TARGET_RATE as usize];
+    state.full(full, &silence).map_err(|e| anyhow!("whisper falló: {e}"))?;
+    Ok(())
+}
+
 pub fn backend_name() -> &'static str {
     if cfg!(feature = "cuda") {
         "CUDA"

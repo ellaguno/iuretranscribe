@@ -64,6 +64,12 @@
       <span>Nueva versión {app.updateNotice.version}</span>
     </button>
   {/if}
+  {#if app.gpuNotice}
+    <button class="update gpu" class:bad={app.gpuNotice.level === "none"} onclick={() => openUrl(app.gpuNotice!.url)} title={app.gpuNotice.message}>
+      <Icon name="download" size={14} />
+      <span>{app.gpuNotice.level === "none" ? "Esta versión no funciona aquí: descarga la versión sin GPU" : "Sin GPU: conviene la versión sin GPU"}</span>
+    </button>
+  {/if}
   <div class="foot">
     <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? "Conectado a Iurefficient" : "Conectar con Iurefficient"}>
       <Icon name="cloud" size={15} />
@@ -111,6 +117,8 @@
   .warn { color: var(--warn); }
   .update { display: flex; align-items: center; gap: 8px; margin: 0 4px 6px; padding: 8px 10px; border-radius: 9px; background: var(--accent); color: var(--accent-text); font-weight: 650; font-size: 13px; }
   .update:hover { background: var(--accent-hover); }
+  .update.gpu { background: #b7791f; color: #fff; text-align: left; }
+  .update.gpu.bad { background: var(--danger); }
   .conn { text-align: left; color: var(--accent); font-weight: 600; padding: 4px 0; }
   .conn.ok { color: var(--success); font-weight: 550; }
   .conn:hover { text-decoration: underline; }

@@ -325,6 +325,13 @@ export interface UpdateNotice {
   url: string;
 }
 
+/** Aviso de la sonda de GPU (variantes CUDA/Vulkan): "cpu" = sigue con procesador; "none" = esta variante no sirve aquí. */
+export interface GpuNotice {
+  level: "cpu" | "none";
+  message: string;
+  url: string;
+}
+
 export const api = {
   checkUpdateNotice: () => invoke<UpdateNotice | null>("check_update_notice"),
   iureTestConnection: () => invoke<IureConnectionInfo>("iure_test_connection"),

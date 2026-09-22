@@ -62,6 +62,11 @@ pub struct Settings {
     pub my_name: String,
     /// Consultar en GitHub si hay una versión nueva al arrancar.
     pub check_updates: bool,
+    /// Resultado de la sonda de GPU de las variantes CUDA/Vulkan: "gpu" (funciona),
+    /// "cpu" (sólo el procesador) o "none" (ni siquiera arranca). Vacío = sin probar.
+    pub gpu_probe_result: String,
+    /// Versión de la app con la que se hizo la sonda (se repite al actualizar).
+    pub gpu_probe_version: String,
 }
 
 impl Default for Settings {
@@ -100,6 +105,8 @@ impl Default for Settings {
             speaker_split: true,
             my_name: String::new(),
             check_updates: true,
+            gpu_probe_result: String::new(),
+            gpu_probe_version: String::new(),
         }
     }
 }

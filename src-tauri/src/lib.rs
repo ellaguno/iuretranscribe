@@ -1,4 +1,5 @@
 mod audio;
+mod gpu;
 mod llm;
 mod models;
 mod recorder;
@@ -28,7 +29,7 @@ pub struct AppState {
     bundled_models_dir: Option<PathBuf>,
     recordings_default: PathBuf,
     recorder: Arc<Recorder>,
-    settings: Mutex<Settings>,
+    settings: Arc<Mutex<Settings>>,
     downloads: Arc<Downloads>,
     engine: Arc<Engine>,
     jobs: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -275,6 +276,13 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
     let Some(model_path) = models::resolve(&state.models_dir, state.bundled_models_dir.as_deref(), &settings.model_id) else {
         return Err(format!("El modelo «{}» no está descargado. Descárgalo en la sección Modelos.", settings.model_id));
     };
+    let use_gpu = {
+        let (app, mp, want, sp) = (app.clone(), model_path.clone(), settings.use_gpu, state.settings_path.clone());
+        let settings_mutex = state.settings.clone();
+        tauri::async_runtime::spawn_blocking(move || gpu::effective_use_gpu(&app, &settings_mutex, &sp, &mp, want))
+            .await
+            .map_err(|e| e.to_string())??
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     state.jobs.lock().unwrap().insert(request.job_id.clone(), cancel.clone());
 
@@ -287,7 +295,7 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
         model_path,
         language: settings.language.clone(),
         translate: settings.translate,
-        use_gpu: settings.use_gpu,
+        use_gpu,
         threads: settings.threads,
         beam_size: settings.beam_size.max(1),
         initial_prompt: None,
@@ -502,6 +510,19 @@ async fn start_recording(app: AppHandle, state: State<'_, AppState>, speakers: O
         None
     };
     let is_live = live.is_some();
+    // Variantes CUDA/Vulkan: comprobar la GPU en un proceso hijo antes de cargar el
+    // modelo en éste (si el driver falla, ggml abortaría la app sin aviso).
+    let live = match live {
+        Some(mut l) => {
+            let (app, mp, want, sp) = (app.clone(), l.options.model_path.clone(), l.options.use_gpu, state.settings_path.clone());
+            let settings_mutex = state.settings.clone();
+            l.options.use_gpu = tauri::async_runtime::spawn_blocking(move || gpu::effective_use_gpu(&app, &settings_mutex, &sp, &mp, want))
+                .await
+                .map_err(|e| e.to_string())??;
+            Some(l)
+        }
+        None => None,
+    };
     let opts = recorder::StartOptions {
         capture_mic: settings.record_mic,
         mic_device: settings.mic_device.clone(),
@@ -1071,6 +1092,10 @@ fn read_text_file(path: String) -> Result<String, String> {
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,whisper_rs=warn")).init();
     whisper_rs::install_logging_hooks();
+    // Proceso hijo de la sonda de GPU: no arranca la interfaz.
+    if let Some(code) = gpu::handle_probe_args() {
+        std::process::exit(code);
+    }
 
     tauri::Builder::default()
         // Una sola instancia: si el usuario abre otro archivo o un enlace
@@ -1124,7 +1149,7 @@ pub fn run() {
                 recordings_default: dirs::audio_dir().unwrap_or_else(|| data_dir.clone()).join("IureTranscribe"),
                 recorder: Arc::new(Recorder::default()),
                 models_dir,
-                settings: Mutex::new(settings),
+                settings: Arc::new(Mutex::new(settings)),
                 downloads: Arc::new(Downloads::default()),
                 engine: Arc::new(Engine::default()),
                 jobs: Mutex::new(HashMap::new()),
