@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api, type DocKind } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, renameJob, retranscribe, toast, type Job } from "../lib/state.svelte";
+  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, renameJob, retranscribe, diarizeJob, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -250,6 +250,9 @@
             <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
           {/each}
           <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
+          <button class="btn sm ghost" title={app.diarReady ? "Identificar quién habla (Hablante 1, 2…) y reescribir los archivos" : "Descarga los modelos de hablantes en Modelos"} disabled={!!app.diarizing[job.id]} onclick={() => (app.diarReady ? diarizeJob(job) : (app.view = "models"))}>
+            {#if app.diarizing[job.id]}<span class="spin"><Icon name="loader" size={14} /></span> Identificando…{:else}<Icon name="speaker" size={14} /> Hablantes{/if}
+          </button>
           <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
           {#if iureConfigured() || iureLoggedIn()}
             <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? `Guardado en ${job.iure.folder} · volver a subir` : "Subir transcripción, resumen y minuta a un proyecto de Iurefficient"} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>

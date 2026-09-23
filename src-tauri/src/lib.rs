@@ -1,4 +1,5 @@
 mod audio;
+mod diarize;
 mod gpu;
 mod llm;
 mod models;
@@ -387,6 +388,42 @@ fn save_live_transcript(state: State<'_, AppState>, request: LiveTranscriptReque
         base_name,
         detected_language: None,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiarizeResult {
+    segments: Vec<Segment>,
+    outputs: Vec<OutputFile>,
+    speakers: usize,
+    elapsed_secs: f64,
+}
+
+/// ¿Están descargados los modelos de identificación de hablantes?
+#[tauri::command]
+fn diarization_ready(state: State<'_, AppState>) -> bool {
+    models::diar_paths(&state.models_dir).is_some()
+}
+
+/// Identifica quién habla en la grabación, etiqueta los segmentos («Hablante 1»…)
+/// y reescribe los archivos de salida.
+#[tauri::command]
+async fn diarize_job(state: State<'_, AppState>, path: String, segments: Vec<Segment>, num_speakers: Option<u32>) -> Result<DiarizeResult, String> {
+    let (seg_model, emb_model) = models::diar_paths(&state.models_dir).ok_or("Descarga primero los modelos de hablantes en la sección Modelos")?;
+    let settings = state.settings.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
+        let input = PathBuf::from(&path);
+        let samples = audio::decode_to_pcm16k(&input).map_err(|e| format!("{e:#}"))?;
+        let turns = diarize::diarize(&seg_model, &emb_model, &samples, num_speakers).map_err(|e| format!("{e:#}"))?;
+        let mut segments = segments;
+        let speakers = diarize::assign(&mut segments, &turns);
+        let (outputs, _, _) = write_outputs(&settings, &input, &segments)?;
+        log::info!("hablantes: {speakers} en {:.0} s de audio ({:.1} s)", samples.len() as f64 / audio::TARGET_RATE as f64, t0.elapsed().as_secs_f64());
+        Ok(DiarizeResult { segments, outputs, speakers, elapsed_secs: t0.elapsed().as_secs_f64() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1340,6 +1377,8 @@ pub fn run() {
             reveal_path,
             read_text_file,
             rename_job,
+            diarization_ready,
+            diarize_job,
             apps_status,
             open_with_app,
             launch_app,

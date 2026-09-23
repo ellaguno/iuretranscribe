@@ -168,6 +168,19 @@ jobs:
           curl -sSL --retry 3 -o src-tauri/resources/models/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
           ls -la src-tauri/resources/models
 
+      # Identificación de hablantes: ejecutable aparte (sidecar) porque onnxruntime
+      # estático y whisper.cpp no conviven en el mismo binario. Tauri lo busca como
+      # binaries/iuretranscribe-diarize-<triple> y lo instala junto a la app.
+      - name: Sidecar de identificación de hablantes
+        shell: bash
+        run: |
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          EXE=""; [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          cargo build --release --manifest-path src-tauri/diarizer/Cargo.toml --target-dir src-tauri/diarizer/target
+          mkdir -p src-tauri/binaries
+          cp "src-tauri/diarizer/target/release/iuretranscribe-diarize$EXE" "src-tauri/binaries/iuretranscribe-diarize-$TRIPLE$EXE"
+          ls -la src-tauri/binaries
+
       - name: Compilar y empaquetar
         uses: tauri-apps/tauri-action@v0
         env:

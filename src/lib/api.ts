@@ -397,6 +397,9 @@ export const api = {
   launchArgs: () => invoke<string[]>("launch_args"),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  diarizationReady: () => invoke<boolean>("diarization_ready"),
+  diarizeJob: (path: string, segments: Segment[], numSpeakers: number | null) =>
+    invoke<{ segments: Segment[]; outputs: OutputFile[]; speakers: number; elapsedSecs: number }>("diarize_job", { path, segments, numSpeakers }),
   renameJob: (path: string, outputDir: string | null, baseName: string | null, newName: string) =>
     invoke<{ path: string; name: string; baseName: string; moved: [string, string][] }>("rename_job", { path, outputDir, baseName, newName }),
 };

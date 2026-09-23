@@ -174,6 +174,10 @@ export const app = $state({
   apps: null as AppStatus[] | null,
   /** Unidades de IureDav configuradas en este equipo. */
   davMounts: [] as DavMount[],
+  /** Modelos de identificación de hablantes descargados (null = sin consultar). */
+  diarReady: null as boolean | null,
+  /** Trabajos a los que se les está identificando hablantes. */
+  diarizing: {} as Record<string, boolean>,
 });
 
 export function appStatus(id: AppId): AppStatus | undefined {
@@ -369,6 +373,7 @@ export async function init() {
   await restoreJobs();
   startPersistence();
   refreshIureSession();
+  refreshDiarReady();
   // Si se inició sesión en otra app de Iurefficient, al volver a esta ventana se toma
   // del llavero compartido sin reiniciar.
   window.addEventListener("focus", () => {
@@ -396,6 +401,12 @@ export async function init() {
   });
   await listen<DownloadProgress>("model-download-progress", (e) => {
     const p = e.payload;
+    if (p.id.startsWith("diar-")) {
+      // Los dos modelos de hablantes se descargan juntos: el aviso lo da downloadDiarModels.
+      if (p.status === "downloading") app.downloads[p.id] = { downloaded: p.downloaded, total: p.total };
+      else delete app.downloads[p.id];
+      return;
+    }
     if (p.status === "downloading") {
       app.downloads[p.id] = { downloaded: p.downloaded, total: p.total };
     } else {
@@ -1081,6 +1092,57 @@ export async function downloadModel(id: string) {
     delete app.downloads[id];
     await refreshModels();
     if (!/cancelad/i.test(String(e))) toast(String(e), "error", 8000);
+  }
+}
+
+export const DIAR_MODELS = ["diar-segmentation", "diar-embedding"];
+
+export async function refreshDiarReady() {
+  try {
+    app.diarReady = await api.diarizationReady();
+  } catch {
+    app.diarReady = false;
+  }
+}
+
+/** Descarga los dos modelos de identificación de hablantes (~32 MB). */
+export async function downloadDiarModels() {
+  try {
+    for (const id of DIAR_MODELS) {
+      app.downloads[id] = { downloaded: 0, total: null };
+      await api.downloadModel(id);
+    }
+    toast("Modelos de hablantes descargados", "success");
+  } catch (e) {
+    if (!/cancelad/i.test(String(e))) toast(`No se pudieron descargar los modelos de hablantes: ${e}`, "error", 8000);
+  } finally {
+    for (const id of DIAR_MODELS) delete app.downloads[id];
+    await refreshDiarReady();
+  }
+}
+
+/** Número de participantes capturados en los detalles (si son 2 o más, fija cuántos hablantes buscar). */
+function participantCount(m: JobMeta): number | null {
+  const n = m.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).length;
+  return n >= 2 ? n : null;
+}
+
+/** Identifica quién habla («Hablante 1», «Hablante 2»…) y reescribe los archivos. */
+export async function diarizeJob(job: Job) {
+  if (!job.result || app.diarizing[job.id]) return;
+  app.diarizing[job.id] = true;
+  try {
+    const n = participantCount(job.meta);
+    const r = await api.diarizeJob(job.path, job.result.segments, n);
+    job.result.segments = r.segments;
+    job.result.outputs = r.outputs;
+    job.result.text = r.segments.map(segmentLine).filter(Boolean).join("\n");
+    toast(`${r.speakers} hablante(s) identificados en ${Math.round(r.elapsedSecs)} s${n ? ` (buscando ${n}, según los participantes)` : ""}`, "success", 7000);
+    notify("IureTranscribe", `Hablantes identificados en ${job.name}`);
+  } catch (e) {
+    toast(String(e), "error", 9000);
+  } finally {
+    delete app.diarizing[job.id];
   }
 }
 

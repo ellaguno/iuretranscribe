@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, downloadModel, cancelDownload, deleteModel, saveSettings, refreshModels, toast } from "../lib/state.svelte";
+  import { app, downloadModel, cancelDownload, deleteModel, downloadDiarModels, DIAR_MODELS, refreshDiarReady, saveSettings, refreshModels, toast } from "../lib/state.svelte";
   import { fmtBytes, fmtMb } from "../lib/format";
   import Icon from "./Icon.svelte";
 
@@ -10,6 +10,12 @@
     saveSettings({ modelId: id });
     toast("Modelo seleccionado", "success", 2000);
   }
+  let diarDl = $derived(DIAR_MODELS.map((id) => app.downloads[id]).find(Boolean));
+  async function deleteDiar() {
+    for (const id of DIAR_MODELS) await api.deleteModel(id).catch(() => {});
+    await refreshDiarReady();
+    toast("Modelos de hablantes eliminados", "info");
+  }
   function openDir() {
     if (app.sys) api.openPath(app.sys.modelsDir).catch((e) => toast(String(e), "error"));
   }
@@ -18,7 +24,7 @@
 <header class="top">
   <div>
     <h1>Modelos</h1>
-    <p class="hint">Los modelos se descargan una sola vez desde Hugging Face (whisper.cpp) y se guardan en tu equipo.</p>
+    <p class="hint">Los modelos se descargan una sola vez y se guardan en tu equipo.</p>
   </div>
   <div class="hactions">
     <button class="btn ghost sm" onclick={refreshModels}><Icon name="refresh" size={15} /> Actualizar</button>
@@ -27,6 +33,31 @@
 </header>
 
 <div class="list scroll">
+  <div class="card model diar">
+    <div class="mhead">
+      <div class="mtitle">
+        <h3><Icon name="speaker" size={16} /> Identificación de hablantes</h3>
+        {#if app.diarReady}<span class="pill success"><Icon name="check" size={11} stroke={3} /> Lista</span>{/if}
+      </div>
+      <span class="size">{fmtMb(32)}</span>
+    </div>
+    <p class="desc">Distingue quién habla en una grabación («Hablante 1», «Hablante 2»…) a partir de la voz, en cualquier idioma y sin conexión. Se usa desde el botón «Hablantes» de cada transcripción. Modelos: segmentación pyannote 3.0 y huellas de voz WeSpeaker.</p>
+    <div class="mfoot">
+      <span class="pill">Complemento</span>
+      <span class="spacer"></span>
+      {#if diarDl}
+        <div class="dl">
+          <div class="progress" class:indeterminate={!diarDl.total}><div style="width:{diarDl.total ? (diarDl.downloaded / diarDl.total) * 100 : 0}%"></div></div>
+          <span class="hint">{fmtBytes(diarDl.downloaded)}{diarDl.total ? ` / ${fmtBytes(diarDl.total)}` : ""}</span>
+        </div>
+        <button class="btn sm danger" onclick={() => DIAR_MODELS.forEach((id) => cancelDownload(id))}><Icon name="x" size={14} /> Cancelar</button>
+      {:else if app.diarReady}
+        <button class="btn sm ghost danger" title="Eliminar del disco" onclick={deleteDiar}><Icon name="trash" size={14} /></button>
+      {:else}
+        <button class="btn sm primary" onclick={downloadDiarModels}><Icon name="download" size={14} /> Descargar</button>
+      {/if}
+    </div>
+  </div>
   {#each app.models as m (m.id)}
     {@const dl = app.downloads[m.id]}
     {@const current = app.settings?.modelId === m.id}
@@ -71,6 +102,7 @@
   .list { flex: 1; min-height: 0; padding: 0 26px 26px; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-content: start; }
   .model { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
   .model.current { border-color: var(--accent); }
+  .diar h3 { display: inline-flex; align-items: center; gap: 6px; }
   .mhead { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .mtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .size { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }

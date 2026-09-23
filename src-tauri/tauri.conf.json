@@ -65,6 +65,9 @@
     "resources": {
       "resources/models/ggml-base.bin": "models/ggml-base.bin"
     },
+    "externalBin": [
+      "binaries/iuretranscribe-diarize"
+    ],
     "createUpdaterArtifacts": true
   },
   "plugins": {

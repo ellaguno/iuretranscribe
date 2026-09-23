@@ -1,0 +1,19 @@
+[package]
+name = "iuretranscribe-diarize"
+version = "0.1.0"
+edition = "2021"
+description = "Identificación de hablantes de IureTranscribe (proceso aparte: sherpa-onnx/onnxruntime no convive con whisper.cpp en el mismo binario)"
+license = "MIT"
+publish = false
+
+# Paquete independiente: no forma parte del crate de la app.
+[workspace]
+
+[dependencies]
+sherpa-onnx = "=1.13.8"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
