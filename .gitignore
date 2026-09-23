@@ -6,3 +6,5 @@ src-tauri/gen/schemas/
 *.log
 src-tauri/cuda-libs/
 src-tauri/resources/
+src-tauri/binaries/
+src-tauri/diarizer/target/

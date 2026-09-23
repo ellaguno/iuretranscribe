@@ -2224,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "iuretranscribe"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "anyhow",
  "bytes",

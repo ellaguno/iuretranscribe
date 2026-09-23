@@ -405,16 +405,31 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
         })
         .collect();
     let mut opts = live.options.clone();
+    // Con la GPU haciendo el trabajo pesado, más hilos sólo añaden calor y compiten con
+    // la videollamada; en vivo se limitan (cada bloque, y hasta dos fuentes, cada pocos s).
+    let cores = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(4);
+    opts.threads = match opts.threads {
+        0 => LIVE_MAX_THREADS.min(cores),
+        n => n.min(LIVE_MAX_THREADS),
+    };
+    log::info!(
+        "en vivo: bloques de {:.0} s, {} hilos, {}",
+        live.chunk_secs,
+        opts.threads,
+        if names.is_some() { "micrófono y sistema por separado" } else { "mezcla" }
+    );
     let user_prompt = opts.initial_prompt.take().filter(|p| !p.trim().is_empty());
     let sink: EventSink = Arc::new(|_: EngineEvent| {});
     let cancel = Arc::new(AtomicBool::new(false));
 
-    let mut process = |st: &mut LiveStream, piece: Vec<f32>| {
+    // Devuelve los segundos que tardó en transcribir el bloque (None si era silencio).
+    let mut process = |st: &mut LiveStream, piece: Vec<f32>| -> Option<f64> {
         let offset_ms = (st.offset * 1000 / rate as u64) as i64;
         st.offset += piece.len() as u64;
         if rms(&piece) < 0.002 {
-            return; // silencio: evita alucinaciones
+            return None; // silencio: evita alucinaciones
         }
+        let t0 = Instant::now();
         // Prompt = el del usuario (vocabulario, nombres) + el final del bloque anterior.
         opts.initial_prompt = match (user_prompt.as_deref(), st.prompt.is_empty()) {
             (Some(u), false) => Some(format!("{u} {}", st.prompt)),
@@ -444,8 +459,12 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
                 *err_slot.lock().unwrap() = Some(format!("Transcripción en vivo: {e}"));
             }
         }
+        Some(t0.elapsed().as_secs_f64())
     };
     let pending_of = |streams: &[LiveStream]| (streams.iter().map(|s| s.buf.len()).max().unwrap_or(0) * 10 / rate) as u32;
+
+    let mut stats = LiveStats::new();
+    let mut total = LiveStats::new();
 
     loop {
         match rx.recv_timeout(Duration::from_millis(200)) {
@@ -458,18 +477,91 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
             while st.buf.len() >= chunk {
                 let cut = find_cut(&st.buf, chunk, rate * 2);
                 let piece: Vec<f32> = st.buf.drain(..cut).collect();
-                process(st, piece);
+                let secs = piece.len() as f64 / rate as f64;
+                let busy = process(st, piece);
+                stats.add(secs, busy);
+                total.add(secs, busy);
             }
         }
-        pending.store(pending_of(&streams), Ordering::Relaxed);
+        let pend = pending_of(&streams);
+        pending.store(pend, Ordering::Relaxed);
+        if stats.since.elapsed() >= LIVE_LOG_EVERY {
+            stats.log("último minuto", pend as f64 / 10.0);
+            stats = LiveStats::new();
+        }
     }
     for st in streams.iter_mut() {
         if st.buf.len() >= rate {
             let piece = std::mem::take(&mut st.buf);
-            process(st, piece);
+            let secs = piece.len() as f64 / rate as f64;
+            let busy = process(st, piece);
+            total.add(secs, busy);
         }
     }
+    total.log("grabación completa", 0.0);
     pending.store(0, Ordering::Relaxed);
+}
+
+const LIVE_MAX_THREADS: u32 = 4;
+const LIVE_LOG_EVERY: Duration = Duration::from_secs(60);
+
+/// Cuánto le cuesta a la transcripción en vivo seguir el ritmo, para el registro:
+/// si una grabación larga pone lento el equipo, esto dice si fue la app.
+struct LiveStats {
+    since: Instant,
+    chunks: u32,
+    silent: u32,
+    audio_secs: f64,
+    busy_secs: f64,
+    /// Peor bloque: segundos de proceso por segundo de audio.
+    worst_ratio: f64,
+}
+
+impl LiveStats {
+    fn new() -> Self {
+        Self { since: Instant::now(), chunks: 0, silent: 0, audio_secs: 0.0, busy_secs: 0.0, worst_ratio: 0.0 }
+    }
+
+    fn add(&mut self, audio_secs: f64, busy: Option<f64>) {
+        self.chunks += 1;
+        self.audio_secs += audio_secs;
+        match busy {
+            Some(b) => {
+                self.busy_secs += b;
+                self.worst_ratio = self.worst_ratio.max(b / audio_secs.max(0.1));
+            }
+            None => self.silent += 1,
+        }
+    }
+
+    fn log(&self, what: &str, pending_secs: f64) {
+        if self.chunks == 0 {
+            return;
+        }
+        let rss = process_rss_mb().map(|m| format!(", memoria {m} MB")).unwrap_or_default();
+        let msg = format!(
+            "en vivo ({what}): {} bloques ({} en silencio), {:.0} s de audio en {:.1} s de proceso, peor bloque {:.2}× tiempo real, pendiente {:.0} s{rss}",
+            self.chunks, self.silent, self.audio_secs, self.busy_secs, self.worst_ratio, pending_secs
+        );
+        // Atrasada: lo pendiente crece o algún bloque tardó más que su propio audio.
+        if pending_secs > 30.0 || self.worst_ratio > 1.0 {
+            log::warn!("{msg} — la transcripción en vivo va atrasada");
+        } else {
+            log::info!("{msg}");
+        }
+    }
+}
+
+/// Memoria residente del proceso en MB (sólo Linux; en otros sistemas no se registra).
+fn process_rss_mb() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let kb: u64 = status.lines().find(|l| l.starts_with("VmRSS:"))?.split_whitespace().nth(1)?.parse().ok()?;
+        return Some(kb / 1024);
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 // ---------------------------------------------------------------------------
