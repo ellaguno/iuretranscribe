@@ -182,7 +182,7 @@ export interface ModelInfo {
   path: string;
 }
 
-export type AppId = "transcribe" | "editor" | "dav";
+export type AppId = "transcribe" | "editor" | "dav" | "ocr";
 export interface AppStatus {
   id: AppId;
   name: string;

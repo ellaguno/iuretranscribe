@@ -51,7 +51,7 @@ botón ofrece dos destinos más:
   de reunión con la duración y el resumen.
 
 El conector es el crate común [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect),
-compartido con IureEditor e IureDav; las credenciales viven en el llavero del sistema
+compartido con IureEditor, IureDav e IureOCR; las credenciales viven en el llavero del sistema
 (la misma entrada de contraseña WebDAV que usa IureDav), no en el archivo de ajustes.
 
 ## Grabación

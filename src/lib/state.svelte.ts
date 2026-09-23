@@ -369,6 +369,11 @@ export async function init() {
   await restoreJobs();
   startPersistence();
   refreshIureSession();
+  // Si se inició sesión en otra app de Iurefficient, al volver a esta ventana se toma
+  // del llavero compartido sin reiniciar.
+  window.addEventListener("focus", () => {
+    if (!app.iureSession?.loggedIn) refreshIureSession();
+  });
   if (settings.checkUpdates) {
     setTimeout(() => {
       import("./updater").then((m) => m.checkForUpdates(true)).catch(() => {});

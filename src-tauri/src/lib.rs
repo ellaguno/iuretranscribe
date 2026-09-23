@@ -1041,7 +1041,7 @@ async fn iure_upload_to_crm(app: AppHandle, state: State<'_, AppState>, request:
 // Apps de Iurefficient (IureEditor, IureDav): detección, lanzamiento y enlaces.
 // ---------------------------------------------------------------------------
 
-/// Estado de las tres apps de escritorio (instalada, ruta, última versión en GitHub).
+/// Estado de las apps de escritorio de Iurefficient (instalada, ruta, última versión en GitHub).
 #[tauri::command]
 async fn apps_status(with_network: bool) -> Vec<iurefficient_connect::apps::AppStatus> {
     if with_network {
@@ -1263,7 +1263,7 @@ pub fn run() {
             let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
             let mut settings = Settings::load(&settings_path);
-            // Sin cuenta configurada: si otra app de Iurefficient (IureDav, IureEditor)
+            // Sin cuenta configurada: si otra app de Iurefficient (IureDav, IureEditor, IureOCR)
             // ya inició sesión en este equipo, se toma su instancia y correo; la sesión
             // y la contraseña WebDAV están en el llavero compartido.
             if settings.iure_domain.trim().is_empty() || settings.iure_email.trim().is_empty() {

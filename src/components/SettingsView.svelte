@@ -1,6 +1,6 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api } from "../lib/api";
+  import { api, type AppId } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { app, refreshApps, refreshIureSession, saveSettings, toast } from "../lib/state.svelte";
@@ -90,7 +90,8 @@
     await refreshApps(true);
     appsLoading = false;
   }
-  async function launch(id: "transcribe" | "editor" | "dav") {
+  const REPOS: Record<AppId, string> = { transcribe: "iuretranscribe", editor: "iureditor", dav: "iuredav", ocr: "iureocr" };
+  async function launch(id: AppId) {
     try {
       await api.launchApp(id);
     } catch (e) {
@@ -328,7 +329,7 @@
       <h2><Icon name="apps" size={17} /> Apps de Iurefficient</h2>
       <button class="btn sm ghost" onclick={loadApps} disabled={appsLoading}>{#if appsLoading}<span class="spin"><Icon name="loader" size={14} /></span>{:else}<Icon name="refresh" size={14} />{/if} Actualizar</button>
     </div>
-    <p class="hint">Las tres apps de escritorio trabajan juntas: IureTranscribe transcribe, IureEditor edita y publica los documentos, IureDav monta los documentos de tu instancia como una unidad local. Comparten la sesión y las contraseñas de aplicación en el llavero del sistema.</p>
+    <p class="hint">Las apps de escritorio trabajan juntas: IureTranscribe transcribe, IureEditor edita y publica los documentos, IureDav monta los documentos de tu instancia como una unidad local e IureOCR reconoce el texto de documentos escaneados y trabaja con PDF. Comparten la sesión y las contraseñas de aplicación en el llavero del sistema.</p>
     {#if app.apps}
       <div class="apps">
         {#each app.apps as a (a.id)}
@@ -353,7 +354,7 @@
                   <button class="btn sm primary" onclick={() => openUrl(a.downloadUrl)}><Icon name="download" size={13} /> Descargar</button>
                 {/if}
               {/if}
-              <button class="btn sm ghost" onclick={() => openUrl(`https://github.com/${a.id === "transcribe" ? "ellaguno/iuretranscribe" : a.id === "editor" ? "ellaguno/iureditor" : "ellaguno/iuredav"}`)}><Icon name="globe" size={13} /> Código</button>
+              <button class="btn sm ghost" onclick={() => openUrl(`https://github.com/ellaguno/${REPOS[a.id]}`)}><Icon name="globe" size={13} /> Código</button>
             </div>
           </div>
         {/each}
