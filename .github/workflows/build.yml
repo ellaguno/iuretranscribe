@@ -172,14 +172,26 @@ jobs:
       # estático y whisper.cpp no conviven en el mismo binario. Tauri lo busca como
       # binaries/iuretranscribe-diarize-<triple> y lo instala junto a la app.
       - name: Sidecar de identificación de hablantes
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          EXE=""; [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
           cargo build --release --manifest-path src-tauri/diarizer/Cargo.toml --target-dir src-tauri/diarizer/target
           mkdir -p src-tauri/binaries
-          cp "src-tauri/diarizer/target/release/iuretranscribe-diarize$EXE" "src-tauri/binaries/iuretranscribe-diarize-$TRIPLE$EXE"
+          cp src-tauri/diarizer/target/release/iuretranscribe-diarize "src-tauri/binaries/iuretranscribe-diarize-$TRIPLE"
           ls -la src-tauri/binaries
+      # En Windows con PowerShell: tras msvc-dev-cmd, Git Bash antepone /usr/bin y
+      # `link` sería el de coreutils en lugar del enlazador de MSVC.
+      - name: Sidecar de identificación de hablantes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $triple = ((rustc -vV) | Select-String '^host: ').ToString().Substring(6).Trim()
+          cargo build --release --manifest-path src-tauri/diarizer/Cargo.toml --target-dir src-tauri/diarizer/target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item src-tauri/diarizer/target/release/iuretranscribe-diarize.exe "src-tauri/binaries/iuretranscribe-diarize-$triple.exe"
+          Get-ChildItem src-tauri/binaries
 
       - name: Compilar y empaquetar
         uses: tauri-apps/tauri-action@v0
