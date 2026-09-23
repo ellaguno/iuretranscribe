@@ -405,6 +405,7 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
         })
         .collect();
     let mut opts = live.options.clone();
+    let user_prompt = opts.initial_prompt.take().filter(|p| !p.trim().is_empty());
     let sink: EventSink = Arc::new(|_: EngineEvent| {});
     let cancel = Arc::new(AtomicBool::new(false));
 
@@ -414,7 +415,13 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
         if rms(&piece) < 0.002 {
             return; // silencio: evita alucinaciones
         }
-        opts.initial_prompt = if st.prompt.is_empty() { None } else { Some(st.prompt.clone()) };
+        // Prompt = el del usuario (vocabulario, nombres) + el final del bloque anterior.
+        opts.initial_prompt = match (user_prompt.as_deref(), st.prompt.is_empty()) {
+            (Some(u), false) => Some(format!("{u} {}", st.prompt)),
+            (Some(u), true) => Some(u.to_string()),
+            (None, false) => Some(st.prompt.clone()),
+            (None, true) => None,
+        };
         match live.engine.transcribe_pcm(sink.clone(), &opts, &piece, cancel.clone(), true) {
             Ok(out) => {
                 let mut text = String::new();
@@ -423,10 +430,14 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
                     text.push_str(&seg.text);
                     (live.on_segment)(Segment { start_ms: seg.start_ms + offset_ms, end_ms: seg.end_ms + offset_ms, text: seg.text, speaker: st.speaker.clone() });
                 }
-                let text = text.trim().to_string();
-                if !text.is_empty() {
-                    st.prompt = text.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
-                }
+                // El texto anterior sólo da continuidad; si trae un bucle, se lo pasaría
+                // al siguiente bloque ("sí, sí, sí…" en cadena), así que se descarta.
+                let text = text.trim();
+                st.prompt = if text.is_empty() || text.contains('…') {
+                    String::new()
+                } else {
+                    text.chars().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect()
+                };
             }
             Err(e) => {
                 log::warn!("transcripción en vivo: {e:#}");

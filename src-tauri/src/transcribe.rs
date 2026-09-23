@@ -155,9 +155,10 @@ impl Engine {
         params.set_suppress_blank(true);
         params.set_token_timestamps(false);
         if live {
+            // Se conserva el reintento con temperatura (0.2 por defecto): es lo que corta
+            // los bucles de greedy ("sí, sí, sí…") cuando la compresión o la entropía fallan.
             params.set_suppress_nst(true);
             params.set_no_context(true);
-            params.set_temperature_inc(0.0);
         }
         if let Some(p) = opts.initial_prompt.as_deref().filter(|p| !p.trim().is_empty()) {
             params.set_initial_prompt(p);
@@ -205,9 +206,10 @@ impl Engine {
             if text.is_empty() {
                 continue;
             }
-            if live && (seg.no_speech_probability() > 0.7 || is_non_speech_marker(&text)) {
+            if live && (seg.no_speech_probability() > 0.7 || is_non_speech_marker(&text) || wrong_script(&opts.language, &text)) {
                 continue;
             }
+            let Some(text) = clean_repetitions(&text) else { continue };
             segments.push(Segment { start_ms: seg.start_timestamp() * 10, end_ms: seg.end_timestamp() * 10, text, speaker: None });
         }
         let detected_language = {
@@ -223,6 +225,72 @@ impl Engine {
 fn is_non_speech_marker(text: &str) -> bool {
     let t = text.trim();
     (t.starts_with('[') && t.ends_with(']')) || (t.starts_with('(') && t.ends_with(')')) || t.starts_with('♪')
+}
+
+/// Con un idioma de alfabeto latino fijado, un segmento mayoritariamente en otro
+/// alfabeto ("оном") es ruido que el reintento con temperatura convirtió en texto.
+fn wrong_script(language: &str, text: &str) -> bool {
+    const LATIN: &[&str] = &["es", "en", "pt", "fr", "it", "de", "ca", "gl", "eu", "nl", "ro"];
+    if !LATIN.contains(&language) {
+        return false;
+    }
+    let (mut latin, mut other) = (0usize, 0usize);
+    for c in text.chars().filter(|c| c.is_alphabetic()) {
+        if (c as u32) <= 0x024F { latin += 1 } else { other += 1 }
+    }
+    other > latin
+}
+
+/// Normaliza una palabra para comparar repeticiones ("Sí," == "sí").
+fn norm_word(w: &str) -> String {
+    w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
+}
+
+/// Recorta los bucles de whisper: una palabra repetida más de 3 veces seguidas o una
+/// frase de 2 a 4 palabras repetida más de 2 veces se deja en ese máximo. Devuelve
+/// `None` si el segmento era sólo el bucle (p. ej. "no, no, no, no, no, no…").
+pub fn clean_repetitions(text: &str) -> Option<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let keys: Vec<String> = words.iter().map(|w| norm_word(w)).collect();
+    let mut out: Vec<usize> = Vec::with_capacity(words.len());
+    let mut removed = 0usize;
+    let mut i = 0;
+    'outer: while i < words.len() {
+        for n in 1..=4usize {
+            if keys[i..].len() < n * 2 || keys[i..i + n].iter().any(|k| k.is_empty()) {
+                continue;
+            }
+            let mut reps = 1;
+            while i + (reps + 1) * n <= keys.len() && keys[i + reps * n..i + (reps + 1) * n] == keys[i..i + n] {
+                reps += 1;
+            }
+            let keep = if n == 1 { 3 } else { 2 };
+            if reps > keep {
+                // Las primeras copias y la última, cuya puntuación enlaza con lo que sigue.
+                out.extend(i..i + (keep - 1) * n);
+                out.extend(i + (reps - 1) * n..i + reps * n);
+                removed += (reps - keep) * n;
+                i += reps * n;
+                continue 'outer;
+            }
+        }
+        out.push(i);
+        i += 1;
+    }
+    if removed == 0 {
+        return Some(text.to_string());
+    }
+    let distinct: std::collections::HashSet<&String> = keys.iter().filter(|k| !k.is_empty()).collect();
+    if removed >= 4 && distinct.len() <= 4 {
+        return None;
+    }
+    let mut cleaned = out.iter().map(|&j| words[j]).collect::<Vec<_>>().join(" ");
+    // Si el bucle quedó al final, "sí, sí, sí," termina en coma: se cierra con "…".
+    if cleaned.ends_with(',') {
+        cleaned.pop();
+        cleaned.push('…');
+    }
+    Some(cleaned)
 }
 
 /// Variantes cuyo backend puede abortar el proceso (no devolver error) si el driver
@@ -273,6 +341,30 @@ pub fn backend_name() -> &'static str {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn wrong_script_detects_noise() {
+        assert!(wrong_script("es", "оном"));
+        assert!(!wrong_script("es", "Sí, ya se ve. ¿Qué tal?"));
+        assert!(!wrong_script("ru", "оном"));
+        assert!(!wrong_script("auto", "оном"));
+    }
+
+    #[test]
+    fn repetitions_are_trimmed() {
+        assert_eq!(clean_repetitions("Hola, ¿cómo estás?").as_deref(), Some("Hola, ¿cómo estás?"));
+        assert_eq!(clean_repetitions("No, no, no, eso no.").as_deref(), Some("No, no, no, eso no."));
+        assert_eq!(clean_repetitions("Sí, sí, sí, sí, sí, sí, sí, sí, sí, sí,"), None);
+        assert_eq!(clean_repetitions("no no no no no no no no"), None);
+        assert_eq!(
+            clean_repetitions("Entonces lo revisamos mañana y sí, sí, sí, sí, sí, sí, sí, sí,").as_deref(),
+            Some("Entonces lo revisamos mañana y sí, sí, sí…")
+        );
+        assert_eq!(
+            clean_repetitions("Le digo que no sé, no sé, no sé, no sé, no sé qué pasó con el contrato").as_deref(),
+            Some("Le digo que no sé, no sé qué pasó con el contrato")
+        );
+    }
 
     /// Prueba de extremo a extremo: requiere IURE_TEST_MODEL (ruta a un ggml-*.bin)
     /// e IURE_TEST_AUDIO (archivo de audio con voz). Se omite si no están definidos.

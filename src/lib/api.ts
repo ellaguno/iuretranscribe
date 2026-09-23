@@ -397,4 +397,6 @@ export const api = {
   launchArgs: () => invoke<string[]>("launch_args"),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  renameJob: (path: string, outputDir: string | null, baseName: string | null, newName: string) =>
+    invoke<{ path: string; name: string; baseName: string; moved: [string, string][] }>("rename_job", { path, outputDir, baseName, newName }),
 };

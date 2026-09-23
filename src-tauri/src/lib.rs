@@ -1087,6 +1087,70 @@ fn reveal_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RenamedJob {
+    path: String,
+    name: String,
+    base_name: String,
+    /// Pares (ruta anterior, ruta nueva) de todo lo que se renombró.
+    moved: Vec<(String, String)>,
+}
+
+/// Renombra la grabación y sus archivos derivados (`<base>.srt`, `<base>_resumen.md`,
+/// `<base>_minuta.docx`…) de la carpeta de salida. Nada se toca si algún destino ya existe.
+#[tauri::command]
+fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String>, new_name: String) -> Result<RenamedJob, String> {
+    let new_name = new_name.trim().trim_end_matches('.').to_string();
+    if new_name.is_empty() || new_name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
+        return Err("El nombre no puede estar vacío ni llevar / \\ : * ? \" < > |".into());
+    }
+    let src = PathBuf::from(&path);
+    let old_stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = src.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let mut plan: Vec<(PathBuf, PathBuf)> = Vec::new();
+    if src.exists() {
+        plan.push((src.clone(), src.with_file_name(format!("{new_name}{ext}"))));
+    }
+    if let Some(dir) = output_dir.filter(|d| !d.is_empty()) {
+        let base = base_name.filter(|b| !b.is_empty()).unwrap_or_else(|| old_stem.clone());
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let fname = e.file_name().to_string_lossy().into_owned();
+                let Some(rest) = fname.strip_prefix(&base) else { continue };
+                if !(rest.starts_with('.') || rest.starts_with('_')) || e.path() == src {
+                    continue;
+                }
+                plan.push((e.path(), PathBuf::from(&dir).join(format!("{new_name}{rest}"))));
+            }
+        }
+    }
+    if plan.is_empty() {
+        return Err(format!("No se encontró {path}"));
+    }
+    if let Some((_, to)) = plan.iter().find(|(from, to)| from != to && to.exists()) {
+        return Err(format!("Ya existe {}", to.display()));
+    }
+    let mut moved = Vec::new();
+    for (from, to) in &plan {
+        if let Err(e) = std::fs::rename(from, to) {
+            // Deshace lo ya movido para no dejar la grabación a medias.
+            for (a, b) in moved.iter().rev() {
+                let _ = std::fs::rename(b, a);
+            }
+            return Err(format!("No se pudo renombrar {}: {e}", from.display()));
+        }
+        moved.push((from.clone(), to.clone()));
+    }
+    let new_path = src.with_file_name(format!("{new_name}{ext}"));
+    Ok(RenamedJob {
+        path: new_path.to_string_lossy().into_owned(),
+        name: format!("{new_name}{ext}"),
+        base_name: new_name,
+        moved: moved.into_iter().map(|(a, b)| (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned())).collect(),
+    })
+}
+
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("No se pudo leer {path}: {e}"))
@@ -1275,6 +1339,7 @@ pub fn run() {
             open_path,
             reveal_path,
             read_text_file,
+            rename_job,
             apps_status,
             open_with_app,
             launch_app,
@@ -1283,4 +1348,30 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar IureTranscribe");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_job_moves_derived_files() {
+        let dir = std::env::temp_dir().join(format!("iuret-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["Grabación 1.wav", "Grabación 1.srt", "Grabación 1_minuta.md", "Grabación 10.srt", "Otra.srt"] {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        let d = dir.to_string_lossy().into_owned();
+        let r = rename_job(dir.join("Grabación 1.wav").to_string_lossy().into(), Some(d.clone()), Some("Grabación 1".into()), "Junta CDS".into()).unwrap();
+        assert_eq!(r.name, "Junta CDS.wav");
+        assert_eq!(r.moved.len(), 3);
+        let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["Grabación 10.srt", "Junta CDS.srt", "Junta CDS.wav", "Junta CDS_minuta.md", "Otra.srt"]);
+        // Un destino ocupado no toca nada.
+        assert!(rename_job(dir.join("Junta CDS.wav").to_string_lossy().into(), Some(d), None, "Otra".into()).is_err());
+        assert!(dir.join("Junta CDS.wav").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

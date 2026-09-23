@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api, type DocKind } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, retranscribe, toast, type Job } from "../lib/state.svelte";
+  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, renameJob, retranscribe, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -131,6 +131,50 @@
       .filter(Boolean)
       .join(" · "),
   );
+  // Cabecera plegable (datos, acciones y detalles): se recuerda entre sesiones.
+  let headOpen = $state(readHeadOpen());
+  function readHeadOpen() {
+    try {
+      return localStorage.getItem("jobHeadOpen") !== "0";
+    } catch {
+      return true;
+    }
+  }
+  function toggleHead() {
+    headOpen = !headOpen;
+    try {
+      localStorage.setItem("jobHeadOpen", headOpen ? "1" : "0");
+    } catch {}
+  }
+  let collapsedSummary = $derived(
+    [job.result ? fmtDuration(job.result.audioSecs) : isActive(job) ? "Procesando…" : "", metaSummary].filter(Boolean).join(" · "),
+  );
+
+  // ---- Renombrar
+  let renaming = $state(false);
+  let draftName = $state("");
+  let ext = $derived(job.name.includes(".") ? job.name.slice(job.name.lastIndexOf(".")) : "");
+  function startRename() {
+    if (isActive(job)) return;
+    draftName = ext ? job.name.slice(0, -ext.length) : job.name;
+    renaming = true;
+  }
+  let committing = false;
+  async function commitRename() {
+    if (!renaming || committing) return;
+    const stem = draftName.trim();
+    if (!stem || stem + ext === job.name) {
+      renaming = false;
+      return;
+    }
+    committing = true;
+    try {
+      if (await renameJob(job, stem)) renaming = false;
+    } finally {
+      committing = false;
+    }
+  }
+
   let docsDone = $derived(job.summary.status === "done" || job.minutes.status === "done");
   let listEl = $state<HTMLDivElement | null>(null);
 
@@ -148,6 +192,7 @@
     untrack(() => {
       if (id) {
         tab = "transcript";
+        renaming = false;
         showMeta = !metaFilledByUser(job.meta);
       }
     });
@@ -182,8 +227,44 @@
 
 <div class="card panel">
   <div class="phead">
-    <div class="ptitle">
-      <h2 title={job.path}>{job.name}</h2>
+    <div class="trow">
+      <div class="ptitle">
+        <button class="btn icon ghost fold" onclick={toggleHead} aria-expanded={headOpen} title={headOpen ? "Plegar los datos de la grabación" : "Mostrar los datos de la grabación"}>
+          <span class="chev" class:up={headOpen}><Icon name="chevron" size={15} /></span>
+        </button>
+        {#if renaming}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="input rename" bind:value={draftName} autofocus spellcheck="false" aria-label="Nuevo nombre"
+            onkeydown={(e) => { if (e.key === "Enter") commitRename(); else if (e.key === "Escape") renaming = false; }}
+            onblur={commitRename} />
+          {#if ext}<span class="hint">{ext}</span>{/if}
+        {:else}
+          <h2 title={job.path} ondblclick={startRename}>{job.name}</h2>
+          <button class="btn icon ghost" title={isActive(job) ? "No se puede renombrar mientras se procesa" : "Renombrar la grabación y sus archivos"} disabled={isActive(job)} onclick={startRename}><Icon name="edit" size={14} /></button>
+        {/if}
+        {#if !headOpen && collapsedSummary}<span class="mini hint" title={collapsedSummary}>{collapsedSummary}</span>{/if}
+      </div>
+      {#if job.result && headOpen}
+        <div class="outputs">
+          {#each job.result.outputs as o}
+            <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
+          {/each}
+          <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
+          <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
+          {#if iureConfigured() || iureLoggedIn()}
+            <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? `Guardado en ${job.iure.folder} · volver a subir` : "Subir transcripción, resumen y minuta a un proyecto de Iurefficient"} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>
+              <Icon name="upload" size={14} /> {job.iure ? "Guardado en Iurefficient" : "Guardar en Iurefficient"}
+            </button>
+            {#if job.iure}
+              <button class="btn sm ghost" title="Abrir Iurefficient en el navegador" onclick={() => openUrl(job.iure!.webUrl)}><Icon name="external" size={14} /></button>
+            {/if}
+          {:else}
+            <button class="btn sm ghost" title="Conecta tu cuenta de Iurefficient en Ajustes para guardar directo en un proyecto" onclick={() => (app.view = "settings")}><Icon name="cloud" size={14} /> Iurefficient</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+    {#if headOpen}
       {#if job.result}
         <div class="stats">
           <span><Icon name="clock" size={13} /> Audio {fmtDuration(job.result.audioSecs)}</span>
@@ -194,41 +275,24 @@
       {:else if isActive(job)}
         <div class="stats"><span class="spin"><Icon name="loader" size={13} /></span><span>Procesando…</span></div>
       {/if}
-    </div>
-    {#if job.result}
-      <div class="outputs">
-        {#each job.result.outputs as o}
-          <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
-        {/each}
-        <button class="btn sm ghost" title="Mostrar en la carpeta" onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
-        <button class="btn sm ghost" title="Volver a transcribir el archivo completo con calidad alta (beam search)" disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> Calidad alta</button>
-        {#if iureConfigured() || iureLoggedIn()}
-          <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? `Guardado en ${job.iure.folder} · volver a subir` : "Subir transcripción, resumen y minuta a un proyecto de Iurefficient"} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>
-            <Icon name="upload" size={14} /> {job.iure ? "Guardado en Iurefficient" : "Guardar en Iurefficient"}
-          </button>
-          {#if job.iure}
-            <button class="btn sm ghost" title="Abrir Iurefficient en el navegador" onclick={() => openUrl(job.iure!.webUrl)}><Icon name="external" size={14} /></button>
-          {/if}
-        {:else}
-          <button class="btn sm ghost" title="Conecta tu cuenta de Iurefficient en Ajustes para guardar directo en un proyecto" onclick={() => (app.view = "settings")}><Icon name="cloud" size={14} /> Iurefficient</button>
-        {/if}
-      </div>
     {/if}
   </div>
 
-  <div class="meta" class:open={showMeta}>
-    <button class="meta-toggle" onclick={() => (showMeta = !showMeta)} aria-expanded={showMeta}>
-      <Icon name="doc" size={15} />
-      <span>Detalles de la reunión</span>
-      {#if filled}<span class="summary hint" title={metaSummary}>{metaSummary}</span>{:else}<span class="hint">participantes, fecha y lugar para el resumen y la minuta</span>{/if}
-      <span class="chev" class:up={showMeta}><Icon name="chevron" size={14} /></span>
-    </button>
-    {#if showMeta}
-      <div class="meta-body">
-        <MetaForm bind:meta={job.meta} hint={"Se envían junto con la transcripción al generar el resumen y la minuta." + (docsDone ? " Ya se generaron documentos: usa «volver a generar» en su pestaña para aplicar estos cambios." : "")} />
-      </div>
-    {/if}
-  </div>
+  {#if headOpen}
+    <div class="meta" class:open={showMeta}>
+      <button class="meta-toggle" onclick={() => (showMeta = !showMeta)} aria-expanded={showMeta}>
+        <Icon name="doc" size={15} />
+        <span class="mlabel">Detalles de la reunión</span>
+        {#if filled}<span class="summary hint" title={metaSummary}>{metaSummary}</span>{:else}<span class="summary hint">participantes, fecha y lugar para el resumen y la minuta</span>{/if}
+        <span class="chev" class:up={showMeta}><Icon name="chevron" size={14} /></span>
+      </button>
+      {#if showMeta}
+        <div class="meta-body">
+          <MetaForm bind:meta={job.meta} hint={"Se envían junto con la transcripción al generar el resumen y la minuta." + (docsDone ? " Ya se generaron documentos: usa «volver a generar» en su pestaña para aplicar estos cambios." : "")} />
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <div class="tabs">
     <button class:active={tab === "transcript"} onclick={() => (tab = "transcript")}><Icon name="list" size={15} /> Transcripción</button>
@@ -417,18 +481,23 @@
 
 <style>
   .panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .phead { display: flex; justify-content: space-between; gap: 14px; padding: 16px 18px 10px; }
-  .ptitle { min-width: 0; }
-  .ptitle h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .stats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; font-size: 12.5px; color: var(--muted); }
+  .phead { display: flex; flex-direction: column; gap: 6px; padding: 12px 18px 10px 10px; }
+  .trow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+  .ptitle { flex: 1 1 260px; min-width: 0; display: flex; align-items: center; gap: 4px; }
+  .ptitle h2 { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+  .ptitle .rename { flex: 1; min-width: 120px; max-width: 520px; padding: 4px 8px; font-size: 15px; font-weight: 600; }
+  .ptitle .mini { flex: 1 1 0; min-width: 0; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fold { flex-shrink: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; padding-left: 38px; font-size: 12.5px; color: var(--muted); }
   .stats span { display: inline-flex; align-items: center; gap: 5px; }
   .stats .iure { color: var(--accent); }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
-  .outputs { display: flex; gap: 6px; flex-shrink: 0; align-items: flex-start; }
+  .outputs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
   .meta { border-top: 1px solid var(--border); }
   .meta-toggle { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 18px; color: var(--text-2); font-weight: 550; text-align: left; }
   .meta-toggle:hover { background: var(--surface-2); }
   .meta-toggle .hint { font-weight: 400; }
+  .meta-toggle .mlabel { flex-shrink: 0; }
   .chev { margin-left: auto; display: inline-flex; transition: transform 0.15s; }
   .chev.up { transform: rotate(180deg); }
   .meta-body { padding: 4px 18px 14px; }

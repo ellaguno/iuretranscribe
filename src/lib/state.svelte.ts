@@ -708,7 +708,10 @@ async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number
 
 /** Comprueba (sin bloquear) si hay sesión REST válida con la instancia. */
 export async function refreshIureSession() {
-  if (!iureConfigured()) {
+  // La sesión REST sólo necesita instancia y correo; la contraseña WebDAV se crea después
+  // con la sesión (en un equipo nuevo todavía no existe).
+  const s = app.settings;
+  if (!s?.iureDomain.trim() || !s.iureEmail.trim()) {
     app.iureSession = { loggedIn: false, name: null, email: null, crm: false, terminology: null, error: null };
     return;
   }
@@ -976,6 +979,29 @@ export async function downloadComposed(job: Job, c: ComposedDoc) {
     }
   } catch (e) {
     console.warn("descarga de documento generado", e);
+  }
+}
+
+/** Renombra la grabación y sus archivos derivados; `stem` es el nombre sin extensión. */
+export async function renameJob(job: Job, stem: string): Promise<boolean> {
+  try {
+    const r = await api.renameJob(job.path, job.result?.outputDir ?? null, job.result?.baseName ?? null, stem);
+    const map = new Map(r.moved);
+    const fix = (p: string | null | undefined) => (p && map.get(p)) || p;
+    job.path = r.path;
+    job.name = r.name;
+    if (job.result) {
+      job.result.baseName = r.baseName;
+      for (const o of job.result.outputs) o.path = fix(o.path)!;
+    }
+    job.summary.path = fix(job.summary.path) ?? undefined;
+    job.minutes.path = fix(job.minutes.path) ?? undefined;
+    for (const c of job.iure?.composed ?? []) c.localPath = fix(c.localPath) ?? null;
+    toast(`Renombrada a «${r.name}»`, "success", 3000);
+    return true;
+  } catch (e) {
+    toast(`No se pudo renombrar: ${e}`, "error", 8000);
+    return false;
   }
 }
 
