@@ -3,6 +3,7 @@
 //! compatible (p. ej. Opus/WebM) se recurre a `ffmpeg` si está instalado.
 
 use anyhow::{anyhow, Context, Result};
+use iurefficient_connect::tr;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use symphonia::core::audio::SampleBuffer;
@@ -70,7 +71,7 @@ fn probe_duration_ffprobe(path: &Path) -> Option<f64> {
 pub fn decode_to_pcm16k(path: &Path) -> Result<Vec<f32>> {
     match decode_symphonia(path) {
         Ok(samples) if !samples.is_empty() => Ok(samples),
-        Ok(_) => decode_ffmpeg(path).context("El archivo no contiene audio decodificable"),
+        Ok(_) => decode_ffmpeg(path).with_context(|| tr!("The file contains no decodable audio", "El archivo no contiene audio decodificable")),
         Err(sym_err) => {
             log::warn!("symphonia no pudo decodificar {}: {sym_err:#}; probando ffmpeg", path.display());
             decode_ffmpeg(path).map_err(|ff_err| {
@@ -84,7 +85,7 @@ pub fn decode_to_pcm16k(path: &Path) -> Result<Vec<f32>> {
 }
 
 fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
-    let file = std::fs::File::open(path).with_context(|| format!("No se pudo abrir {}", path.display()))?;
+    let file = std::fs::File::open(path).with_context(|| tr!("Could not open {}", "No se pudo abrir {}", path.display()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
@@ -93,17 +94,17 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
     let fmt_opts = FormatOptions { enable_gapless: true, ..Default::default() };
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &fmt_opts, &MetadataOptions::default())
-        .map_err(|e| anyhow!("formato no reconocido: {e}"))?;
+        .map_err(|e| anyhow!(tr!("unrecognized format: {e}", "formato no reconocido: {e}")))?;
     let mut format = probed.format;
     let track = format
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow!("no se encontró una pista de audio"))?;
+        .ok_or_else(|| anyhow!(tr!("no audio track found", "no se encontró una pista de audio")))?;
     let track_id = track.id;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| anyhow!("códec no soportado: {e}"))?;
+        .map_err(|e| anyhow!(tr!("unsupported codec: {e}", "códec no soportado: {e}")))?;
 
     let mut mono: Vec<f32> = Vec::new();
     let mut rate: u32 = track.codec_params.sample_rate.unwrap_or(0);
@@ -117,7 +118,7 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
                 decoder.reset();
                 continue;
             }
-            Err(e) => return Err(anyhow!("error leyendo el contenedor: {e}")),
+            Err(e) => return Err(anyhow!(tr!("error reading the container: {e}", "error leyendo el contenedor: {e}"))),
         };
         if packet.track_id() != track_id {
             continue;
@@ -129,7 +130,7 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
                 continue;
             }
             Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(anyhow!("error decodificando: {e}")),
+            Err(e) => return Err(anyhow!(tr!("decoding error: {e}", "error decodificando: {e}"))),
         };
         let spec = *decoded.spec();
         let channels = spec.channels.count().max(1);
@@ -154,7 +155,7 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
         }
     }
     if rate == 0 {
-        return Err(anyhow!("frecuencia de muestreo desconocida"));
+        return Err(anyhow!(tr!("unknown sample rate", "frecuencia de muestreo desconocida")));
     }
     Ok(resample(&mono, rate, TARGET_RATE))
 }
@@ -166,9 +167,9 @@ fn decode_ffmpeg(path: &Path) -> Result<Vec<f32>> {
         .args(["-vn", "-f", "f32le", "-ac", "1", "-ar", "16000", "-"])
         .stdin(Stdio::null())
         .output()
-        .context("ffmpeg no está instalado o no se pudo ejecutar")?;
+        .with_context(|| tr!("ffmpeg is not installed or could not be run", "ffmpeg no está instalado o no se pudo ejecutar"))?;
     if !out.status.success() {
-        return Err(anyhow!("ffmpeg falló: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(anyhow!(tr!("ffmpeg failed: {}", "ffmpeg falló: {}", String::from_utf8_lossy(&out.stderr).trim())));
     }
     let samples = out
         .stdout

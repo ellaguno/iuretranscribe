@@ -6,6 +6,7 @@
   import { fmtDuration, fmtTimestamp } from "../lib/format";
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
+  import { isOtherPartyLabel, t } from "../lib/i18n.svelte";
 
   let s = $derived(app.settings!);
   let rec = $derived(app.recording);
@@ -40,7 +41,7 @@
   });
 
   async function pickDir() {
-    const dir = await open({ directory: true, title: "Carpeta de grabaciones" });
+    const dir = await open({ directory: true, title: t("record.folder") });
     if (typeof dir === "string") {
       await saveSettings({ recordingsDir: dir });
       app.sys = await api.systemInfo();
@@ -53,15 +54,15 @@
 
 <header class="top">
   <div>
-    <h1>Grabar</h1>
-    <p class="hint">Graba el micrófono y lo que suena en la bocina (videollamadas, reuniones) y transcribe al terminar.</p>
+    <h1>{t("record.title")}</h1>
+    <p class="hint">{t("record.hint")}</p>
   </div>
 </header>
 
 <div class="content scroll">
   <div class="card rec" class:live={rec.active}>
     <div class="rec-main">
-      <button class="rec-btn" class:stop={rec.active} disabled={!canRecord && !rec.active} onclick={() => (rec.active ? stopRecording() : startRecording())} aria-label={rec.active ? "Detener" : "Grabar"}>
+      <button class="rec-btn" class:stop={rec.active} disabled={!canRecord && !rec.active} onclick={() => (rec.active ? stopRecording() : startRecording())} aria-label={rec.active ? t("record.stop") : t("record.record")}>
         {#if app.recordingBusy}
           <span class="spin"><Icon name="loader" size={30} /></span>
         {:else if rec.active}
@@ -74,23 +75,23 @@
         {#if rec.active}
           <div class="timer">{fmtDuration(rec.elapsedSecs)}</div>
           <div class="hint">
-            Grabando… pulsa para detener{s.autoTranscribeRecording ? " y transcribir" : ""}.
-            {#if rec.live}<span class="livetag"><Icon name="zap" size={12} /> en vivo{rec.livePendingSecs > 3 ? ` · retraso ${Math.round(rec.livePendingSecs)} s` : ""}</span>{/if}
+            {s.autoTranscribeRecording ? t("record.recordingTranscribe") : t("record.recording")}.
+            {#if rec.live}<span class="livetag"><Icon name="zap" size={12} /> {t("record.live")}{rec.livePendingSecs > 3 ? t("record.delay", { secs: Math.round(rec.livePendingSecs) }) : ""}</span>{/if}
           </div>
         {:else}
           <div class="timer idle">00:00</div>
-          <div class="hint">{canRecord ? "Pulsa para iniciar la grabación." : "Activa al menos una fuente para grabar."}</div>
+          <div class="hint">{canRecord ? t("record.pressToStart") : t("record.enableSource")}</div>
         {/if}
         {#if rec.error}<div class="err"><Icon name="alert" size={14} /> {rec.error}</div>{/if}
       </div>
     </div>
     <div class="meters">
       <div class="meter" class:off={!s.recordMic}>
-        <span><Icon name="mic" size={14} /> Micrófono</span>
+        <span><Icon name="mic" size={14} /> {t("record.mic")}</span>
         <div class="bar"><div style="width:{Math.round(rec.micLevel * 100)}%"></div></div>
       </div>
       <div class="meter" class:off={!s.recordSystem || sysUnavailable}>
-        <span><Icon name="speaker" size={14} /> Sistema</span>
+        <span><Icon name="speaker" size={14} /> {t("record.system")}</span>
         <div class="bar"><div style="width:{Math.round(rec.sysLevel * 100)}%"></div></div>
       </div>
     </div>
@@ -99,10 +100,10 @@
   <div class="grid">
     <section class="card panel" class:collapsed={!openSources}>
       <button class="phead" onclick={() => (openSources = !openSources)} aria-expanded={openSources}>
-        <h2><Icon name="settings" size={16} /> Fuentes</h2>
+        <h2><Icon name="settings" size={16} /> {t("record.sources")}</h2>
         {#if !openSources}
           <span class="summary hint">
-            {[s.recordMic ? "micrófono" : "", s.recordSystem && !sysUnavailable ? "sistema" : ""].filter(Boolean).join(" + ") || "sin fuentes"}{s.liveTranscription ? (s.liveIsFinal ? " · en vivo (final)" : " · en vivo (vista previa)") : ""}{(!s.liveTranscription || !s.liveIsFinal) && s.autoTranscribeRecording ? " · transcribe al detener" : ""}
+            {[s.recordMic ? t("record.srcMic") : "", s.recordSystem && !sysUnavailable ? t("record.srcSystem") : ""].filter(Boolean).join(" + ") || t("record.noSources")}{s.liveTranscription ? (s.liveIsFinal ? t("record.liveFinal") : t("record.livePreview")) : ""}{(!s.liveTranscription || !s.liveIsFinal) && s.autoTranscribeRecording ? t("record.transcribeOnStop") : ""}
           </span>
         {/if}
         <span class="chev" class:up={openSources}><Icon name="chevron" size={14} /></span>
@@ -111,73 +112,73 @@
       <div class="pbody">
       <div class="switchrow">
         <div>
-          <span class="label">Micrófono</span>
+          <span class="label">{t("record.mic")}</span>
           {#if !isLinux && devices && devices.inputs.length}
             <select class="input small" value={s.micDevice ?? "default"} disabled={rec.active} onchange={(e) => saveSettings({ micDevice: (e.target as HTMLSelectElement).value === "default" ? null : (e.target as HTMLSelectElement).value })}>
-              <option value="default">Predeterminado del sistema</option>
-              {#each devices.inputs as d}<option value={d.id}>{d.name}{d.isDefault ? " (predeterminado)" : ""}</option>{/each}
+              <option value="default">{t("record.systemDefault")}</option>
+              {#each devices.inputs as d}<option value={d.id}>{d.name}{d.isDefault ? t("record.default") : ""}</option>{/each}
             </select>
           {:else}
-            <p class="hint">Se usa el micrófono predeterminado del sistema.</p>
+            <p class="hint">{t("record.usesDefaultMic")}</p>
           {/if}
         </div>
-        <button class="switch" class:on={s.recordMic} aria-label="Grabar micrófono" disabled={rec.active} onclick={() => saveSettings({ recordMic: !s.recordMic })}></button>
+        <button class="switch" class:on={s.recordMic} aria-label={t("record.recordMic")} disabled={rec.active} onclick={() => saveSettings({ recordMic: !s.recordMic })}></button>
       </div>
       <div class="switchrow">
         <div>
-          <span class="label">Audio del sistema (bocina)</span>
+          <span class="label">{t("record.systemAudio")}</span>
           <p class="hint">{devices?.note ?? "…"}</p>
         </div>
-        <button class="switch" class:on={s.recordSystem && !sysUnavailable} aria-label="Grabar audio del sistema" disabled={rec.active || sysUnavailable} onclick={() => saveSettings({ recordSystem: !s.recordSystem })}></button>
+        <button class="switch" class:on={s.recordSystem && !sysUnavailable} aria-label={t("record.recordSystem")} disabled={rec.active || sysUnavailable} onclick={() => saveSettings({ recordSystem: !s.recordSystem })}></button>
       </div>
       <div class="switchrow">
         <div>
-          <span class="label">Distinguir quién habla (tú / interlocutor)</span>
-          <p class="hint">Con micrófono y sistema activos, cada fuente se transcribe por separado y los segmentos llevan nombre. Tu nombre:</p>
-          <input class="input small" placeholder={app.iureSession?.name ?? "Tu nombre"} value={s.myName} disabled={rec.active} oninput={(e) => saveSettings({ myName: (e.target as HTMLInputElement).value })} />
+          <span class="label">{t("record.speakerSplit")}</span>
+          <p class="hint">{t("record.speakerSplitHint")}</p>
+          <input class="input small" placeholder={app.iureSession?.name ?? t("record.yourName")} value={s.myName} disabled={rec.active} oninput={(e) => saveSettings({ myName: (e.target as HTMLInputElement).value })} />
         </div>
-        <button class="switch" class:on={s.speakerSplit && s.recordMic && s.recordSystem} aria-label="Quién habla" disabled={rec.active || !s.recordMic || !s.recordSystem} onclick={() => saveSettings({ speakerSplit: !s.speakerSplit })}></button>
+        <button class="switch" class:on={s.speakerSplit && s.recordMic && s.recordSystem} aria-label={t("record.whoSpeaks")} disabled={rec.active || !s.recordMic || !s.recordSystem} onclick={() => saveSettings({ speakerSplit: !s.speakerSplit })}></button>
       </div>
       <div class="switchrow">
         <div>
-          <span class="label">Transcribir en vivo mientras grabo</span>
+          <span class="label">{t("record.liveTitle")}</span>
           <p class="hint">
-            Procesa el audio en bloques de {Math.round(s.liveChunkSecs)} s con el modelo {model?.name ?? "seleccionado"}{model && !model.downloaded ? " (no descargado)" : ""}.
-            {app.sys?.backend === "CPU" ? "Sin GPU conviene un modelo pequeño (Small o Turbo Q5) para que no se rezague." : ""}
+            {t("record.liveHint", { secs: Math.round(s.liveChunkSecs), model: model?.name ?? t("record.liveHintSelected") })}{model && !model.downloaded ? t("sidebar.notDownloaded") : ""}.
+            {app.sys?.backend === "CPU" ? t("record.liveNoGpu") : ""}
           </p>
           <select class="input small" value={String(Math.round(s.liveChunkSecs))} disabled={rec.active || !s.liveTranscription} onchange={(e) => saveSettings({ liveChunkSecs: Number((e.target as HTMLSelectElement).value) })}>
-            <option value="5">Bloques de 5 s (más inmediato)</option>
-            <option value="8">Bloques de 8 s (recomendado)</option>
-            <option value="12">Bloques de 12 s</option>
-            <option value="20">Bloques de 20 s (mejor contexto)</option>
+            <option value="5">{t("record.chunk5")}</option>
+            <option value="8">{t("record.chunk8")}</option>
+            <option value="12">{t("record.chunk12")}</option>
+            <option value="20">{t("record.chunk20")}</option>
           </select>
         </div>
-        <button class="switch" class:on={s.liveTranscription} aria-label="Transcribir en vivo" disabled={rec.active} onclick={() => saveSettings({ liveTranscription: !s.liveTranscription })}></button>
+        <button class="switch" class:on={s.liveTranscription} aria-label={t("record.liveAria")} disabled={rec.active} onclick={() => saveSettings({ liveTranscription: !s.liveTranscription })}></button>
       </div>
       {#if s.liveTranscription}
         <div class="switchrow">
           <div>
-            <span class="label">Usar la transcripción en vivo como resultado final</span>
-            <p class="hint">Al detener se generan los archivos, el resumen y la minuta con lo ya transcrito, sin repetir el trabajo. Siempre podrás pedir una segunda pasada con calidad alta desde el panel del archivo.</p>
+            <span class="label">{t("record.liveFinalTitle")}</span>
+            <p class="hint">{t("record.liveFinalHint")}</p>
           </div>
-          <button class="switch" class:on={s.liveIsFinal} aria-label="Usar en vivo como final" disabled={rec.active} onclick={() => saveSettings({ liveIsFinal: !s.liveIsFinal })}></button>
+          <button class="switch" class:on={s.liveIsFinal} aria-label={t("record.liveFinalAria")} disabled={rec.active} onclick={() => saveSettings({ liveIsFinal: !s.liveIsFinal })}></button>
         </div>
       {/if}
       {#if !s.liveTranscription || !s.liveIsFinal}
         <div class="switchrow">
           <div>
-            <span class="label">Transcribir la grabación completa al detener</span>
-            <p class="hint">Se agrega a la cola y se procesa con el modelo seleccionado y calidad alta.</p>
+            <span class="label">{t("record.fullOnStop")}</span>
+            <p class="hint">{t("record.fullOnStopHint")}</p>
           </div>
-          <button class="switch" class:on={s.autoTranscribeRecording} aria-label="Transcribir automáticamente" onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
+          <button class="switch" class:on={s.autoTranscribeRecording} aria-label={t("record.autoTranscribeAria")} onclick={() => saveSettings({ autoTranscribeRecording: !s.autoTranscribeRecording })}></button>
         </div>
       {/if}
       <div class="dir">
-        <span class="label">Carpeta de grabaciones</span>
+        <span class="label">{t("record.folder")}</span>
         <div class="row">
           <span class="path" title={app.sys?.recordingsDir}>{app.sys?.recordingsDir}</span>
-          <button class="btn sm ghost" onclick={openDir} title="Abrir carpeta"><Icon name="folder" size={14} /></button>
-          <button class="btn sm" onclick={pickDir} disabled={rec.active}>Cambiar</button>
+          <button class="btn sm ghost" onclick={openDir} title={t("record.openFolder")}><Icon name="folder" size={14} /></button>
+          <button class="btn sm" onclick={pickDir} disabled={rec.active}>{t("record.change")}</button>
         </div>
       </div>
       </div>
@@ -186,28 +187,28 @@
 
     <section class="card panel" class:collapsed={!openMeta}>
       <button class="phead" onclick={() => (openMeta = !openMeta)} aria-expanded={openMeta}>
-        <h2><Icon name="doc" size={16} /> Detalles de la reunión</h2>
+        <h2><Icon name="doc" size={16} /> {t("detail.meetingDetails")}</h2>
         {#if !openMeta}
-          <span class="summary hint">{[app.pendingMeta.date, app.pendingMeta.place, app.pendingMeta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "sin capturar"}</span>
+          <span class="summary hint">{[app.pendingMeta.date, app.pendingMeta.place, app.pendingMeta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")].filter(Boolean).join(" · ") || t("record.notCaptured")}</span>
         {/if}
         <span class="chev" class:up={openMeta}><Icon name="chevron" size={14} /></span>
       </button>
       {#if openMeta}
         <div class="pbody">
-          <MetaForm bind:meta={app.pendingMeta} hint="Puedes llenarlos mientras grabas; se adjuntan a la grabación y se usan para el resumen y la minuta." />
+          <MetaForm bind:meta={app.pendingMeta} hint={t("record.metaHint")} />
         </div>
       {/if}
     </section>
 
     {#if s.liveTranscription}
       <section class="card live" class:full={true}>
-        <h2><Icon name="zap" size={16} /> Transcripción en vivo</h2>
+        <h2><Icon name="zap" size={16} /> {t("record.liveTranscript")}</h2>
         <div class="livebox scroll" bind:this={liveEl}>
           {#if app.liveSegments.length === 0}
-            <p class="hint">{rec.active ? "Esperando el primer bloque de audio…" : "Aquí aparecerá el texto conforme se grabe."}</p>
+            <p class="hint">{rec.active ? t("record.waitingBlock") : t("record.textWillAppear")}</p>
           {:else}
             {#each app.liveSegments as seg, i (i)}
-              <div class="seg"><span class="ts">{fmtTimestamp(seg.startMs)}</span><span>{#if seg.speaker}<span class="spk" class:other={seg.speaker === "Interlocutor"}>{seg.speaker}</span> {/if}{seg.text}</span></div>
+              <div class="seg"><span class="ts">{fmtTimestamp(seg.startMs)}</span><span>{#if seg.speaker}<span class="spk" class:other={isOtherPartyLabel(seg.speaker)}>{seg.speaker}</span> {/if}{seg.text}</span></div>
             {/each}
           {/if}
         </div>

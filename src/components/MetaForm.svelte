@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { JobMeta } from "../lib/state.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { meta = $bindable(), hint = "" }: { meta: JobMeta; hint?: string } = $props();
   const uid = Math.random().toString(36).slice(2, 7);
@@ -7,20 +8,20 @@
 
 <div class="meta-form">
   <div class="field">
-    <label for="m-date-{uid}">Fecha</label>
-    <input id="m-date-{uid}" class="input" placeholder="p. ej. 18 de septiembre de 2026, 10:00" bind:value={meta.date} />
+    <label for="m-date-{uid}">{t("meta.date")}</label>
+    <input id="m-date-{uid}" class="input" placeholder={t("meta.datePh")} bind:value={meta.date} />
   </div>
   <div class="field">
-    <label for="m-place-{uid}">Lugar</label>
-    <input id="m-place-{uid}" class="input" placeholder="p. ej. Sala de juntas / videollamada" bind:value={meta.place} />
+    <label for="m-place-{uid}">{t("meta.place")}</label>
+    <input id="m-place-{uid}" class="input" placeholder={t("meta.placePh")} bind:value={meta.place} />
   </div>
   <div class="field wide">
-    <label for="m-people-{uid}">Participantes</label>
-    <textarea id="m-people-{uid}" class="input short" placeholder="Un nombre por línea, con cargo o rol si aplica" bind:value={meta.participants}></textarea>
+    <label for="m-people-{uid}">{t("meta.participants")}</label>
+    <textarea id="m-people-{uid}" class="input short" placeholder={t("meta.participantsPh")} bind:value={meta.participants}></textarea>
   </div>
   <div class="field wide">
-    <label for="m-notes-{uid}">Notas adicionales</label>
-    <textarea id="m-notes-{uid}" class="input short" placeholder="Contexto útil para la minuta: asunto, cliente, expediente, acuerdos previos…" bind:value={meta.notes}></textarea>
+    <label for="m-notes-{uid}">{t("meta.notes")}</label>
+    <textarea id="m-notes-{uid}" class="input short" placeholder={t("meta.notesPh")} bind:value={meta.notes}></textarea>
   </div>
   {#if hint}<p class="hint wide">{hint}</p>{/if}
 </div>

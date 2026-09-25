@@ -3,21 +3,22 @@
   import { app, selectedModel, toast, type View } from "../lib/state.svelte";
   import Icon from "./Icon.svelte";
   import iconUrl from "../assets/icon.png";
+  import { t, type Key } from "../lib/i18n.svelte";
 
-  const links = [
-    { label: "Sitio web", url: "https://iurefficient.com", icon: "globe" },
-    { label: "Demo", url: "https://demo.iurefficient.com", icon: "demo" },
-    { label: "YouTube", url: "https://youtube.com/@iurefficient", icon: "youtube" },
+  const links: { label: Key; url: string; icon: string }[] = [
+    { label: "sidebar.website", url: "https://iurefficient.com", icon: "globe" },
+    { label: "sidebar.demo", url: "https://demo.iurefficient.com", icon: "demo" },
+    { label: "sidebar.youtube", url: "https://youtube.com/@iurefficient", icon: "youtube" },
   ];
   function go(url: string) {
-    openUrl(url).catch((e) => toast(`No se pudo abrir ${url}: ${e}`, "error"));
+    openUrl(url).catch((e) => toast(t("sidebar.openFailed", { url, error: String(e) }), "error"));
   }
 
-  const items: { id: View; label: string; icon: string }[] = [
-    { id: "transcribe", label: "Transcribir", icon: "waveform" },
-    { id: "record", label: "Grabar", icon: "mic" },
-    { id: "models", label: "Modelos", icon: "layers" },
-    { id: "settings", label: "Ajustes", icon: "settings" },
+  const items: { id: View; label: Key; icon: string }[] = [
+    { id: "transcribe", label: "nav.transcribe", icon: "waveform" },
+    { id: "record", label: "nav.record", icon: "mic" },
+    { id: "models", label: "nav.models", icon: "layers" },
+    { id: "settings", label: "nav.settings", icon: "settings" },
   ];
   let model = $derived(selectedModel());
   let active = $derived(app.jobs.filter((j) => j.status !== "done" && j.status !== "error" && j.status !== "cancelled").length);
@@ -54,21 +55,21 @@
       <div class="name">IureTranscribe</div>
       <div class="ver">v{app.sys?.version ?? ""}</div>
     </div>
-    <button class="toggle" onclick={toggle} title={collapsed ? "Expandir la barra lateral" : "Colapsar la barra lateral"} aria-expanded={!collapsed}>
+    <button class="toggle" onclick={toggle} title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")} aria-expanded={!collapsed}>
       <Icon name="panel" size={16} />
     </button>
   </div>
 
   <nav>
     {#each items as it}
-      <button class:active={app.view === it.id} onclick={() => (app.view = it.id)} title={collapsed ? it.label : undefined}>
+      <button class:active={app.view === it.id} onclick={() => (app.view = it.id)} title={collapsed ? t(it.label) : undefined}>
         <Icon name={it.icon} />
-        <span class="label">{it.label}</span>
+        <span class="label">{t(it.label)}</span>
         {#if it.id === "transcribe" && active > 0}
           <span class="badge">{active}</span>
         {/if}
         {#if it.id === "record" && app.recording.active}
-          <span class="recdot" title="Grabando"></span>
+          <span class="recdot" title={t("sidebar.recording")}></span>
         {/if}
       </button>
     {/each}
@@ -77,44 +78,44 @@
   <div class="links">
     <div class="links-title label">Iurefficient</div>
     {#each links as l}
-      <button onclick={() => go(l.url)} title={collapsed ? `${l.label}: ${l.url}` : l.url}>
+      <button onclick={() => go(l.url)} title={collapsed ? `${t(l.label)}: ${l.url}` : l.url}>
         <Icon name={l.icon} size={15} />
-        <span class="label">{l.label}</span>
+        <span class="label">{t(l.label)}</span>
         <span class="label ext"><Icon name="external" size={12} /></span>
       </button>
     {/each}
   </div>
 
   {#if app.updateNotice}
-    <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title={collapsed ? `Nueva versión ${app.updateNotice.version}` : "Abrir la página de descarga"}>
+    <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title={collapsed ? t("sidebar.newVersion", { version: app.updateNotice.version }) : t("sidebar.openDownloadPage")}>
       <Icon name="download" size={14} />
-      <span class="label">Nueva versión {app.updateNotice.version}</span>
+      <span class="label">{t("sidebar.newVersion", { version: app.updateNotice.version })}</span>
     </button>
   {/if}
   {#if app.gpuNotice}
     <button class="update gpu" class:bad={app.gpuNotice.level === "none"} onclick={() => openUrl(app.gpuNotice!.url)} title={app.gpuNotice.message}>
       <Icon name="download" size={14} />
-      <span class="label">{app.gpuNotice.level === "none" ? "Esta versión no funciona aquí: descarga la versión sin GPU" : "Sin GPU: conviene la versión sin GPU"}</span>
+      <span class="label">{app.gpuNotice.level === "none" ? t("sidebar.gpuNone") : t("sidebar.gpuCpu")}</span>
     </button>
   {/if}
   <div class="foot">
-    <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? "Conectado a Iurefficient" : "Conectar con Iurefficient"}>
+    <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? t("sidebar.connected") : t("sidebar.connect")}>
       <Icon name="cloud" size={15} />
-      <span class="label">{app.iureSession?.loggedIn ? `Iurefficient: ${app.iureSession.name ?? "conectado"}` : "Conectar con Iurefficient"}</span>
+      <span class="label">{app.iureSession?.loggedIn ? t("sidebar.connectedAs", { name: app.iureSession.name ?? t("sidebar.connectedFallback") }) : t("sidebar.connect")}</span>
     </button>
     <div class="row" title={collapsed ? (app.sys?.backend ?? "") : undefined}>
       <Icon name="cpu" size={15} />
       <span class="label">{app.sys?.backend ?? "…"}</span>
       {#if app.sys?.backend === "CPU" && app.settings?.useGpu}
-        <span class="hint label" title="Este binario se compiló sin soporte de GPU">sin GPU</span>
+        <span class="hint label" title={t("sidebar.noGpuBuild")}>{t("sidebar.noGpu")}</span>
       {/if}
     </div>
-    <div class="row" title={collapsed ? (model ? model.name : "Sin modelo") : undefined}>
+    <div class="row" title={collapsed ? (model ? model.name : t("sidebar.noModel")) : undefined}>
       <Icon name="layers" size={15} />
       {#if model}
-        <span class="label" class:warn={!model.downloaded}>{model.name}{model.downloaded ? "" : " (no descargado)"}</span>
+        <span class="label" class:warn={!model.downloaded}>{model.name}{model.downloaded ? "" : t("sidebar.notDownloaded")}</span>
       {:else}
-        <span class="label">Sin modelo</span>
+        <span class="label">{t("sidebar.noModel")}</span>
       {/if}
     </div>
   </div>

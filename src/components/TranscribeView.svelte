@@ -4,11 +4,10 @@
   import Icon from "./Icon.svelte";
   import JobCard from "./JobCard.svelte";
   import JobDetail from "./JobDetail.svelte";
+  import { t, type Key } from "../lib/i18n.svelte";
 
-  const languages: [string, string][] = [
-    ["es", "Español"], ["en", "Inglés"], ["pt", "Portugués"], ["fr", "Francés"], ["de", "Alemán"],
-    ["it", "Italiano"], ["ca", "Catalán"], ["auto", "Detectar automáticamente"],
-  ];
+  // Idioma del audio para Whisper (no el de la interfaz).
+  const languages = ["es", "en", "pt", "fr", "de", "it", "ca", "auto"] as const;
 
   let models = $derived(downloadedModels());
   let queued = $derived(queuedCount());
@@ -20,8 +19,8 @@
   async function pickFiles() {
     const res = await open({
       multiple: true,
-      title: "Selecciona audio o video",
-      filters: [{ name: "Audio y video", extensions: app.sys?.supportedExtensions ?? ["mp3", "wav", "mp4"] }],
+      title: t("transcribe.pickTitle"),
+      filters: [{ name: t("transcribe.pickFilter"), extensions: app.sys?.supportedExtensions ?? ["mp3", "wav", "mp4"] }],
     });
     if (!res) return;
     await addFiles(Array.isArray(res) ? res : [res]);
@@ -30,30 +29,30 @@
 
 <header class="top">
   <div>
-    <h1>Transcribir</h1>
-    <p class="hint">Arrastra archivos de audio o video, elige el modelo y pulsa Transcribir.</p>
+    <h1>{t("transcribe.title")}</h1>
+    <p class="hint">{t("transcribe.hint")}</p>
   </div>
   <div class="controls">
     <div class="field">
-      <label for="model">Modelo</label>
+      <label for="model">{t("transcribe.model")}</label>
       {#if models.length}
         <select id="model" class="input" value={app.settings?.modelId} onchange={(e) => saveSettings({ modelId: (e.target as HTMLSelectElement).value })} disabled={app.running}>
           {#each models as m}
             <option value={m.id}>{m.name}</option>
           {/each}
           {#if app.settings && !models.some((m) => m.id === app.settings?.modelId)}
-            <option value={app.settings.modelId}>{app.settings.modelId} (no descargado)</option>
+            <option value={app.settings.modelId}>{t("transcribe.modelNotDownloaded", { id: app.settings.modelId })}</option>
           {/if}
         </select>
       {:else}
-        <button class="btn sm" onclick={() => (app.view = "models")}><Icon name="download" size={15} /> Descargar un modelo</button>
+        <button class="btn sm" onclick={() => (app.view = "models")}><Icon name="download" size={15} /> {t("transcribe.downloadModel")}</button>
       {/if}
     </div>
     <div class="field">
-      <label for="lang">Idioma</label>
+      <label for="lang">{t("transcribe.language")}</label>
       <select id="lang" class="input" value={app.settings?.language} onchange={(e) => saveSettings({ language: (e.target as HTMLSelectElement).value })} disabled={app.running}>
-        {#each languages as [code, name]}
-          <option value={code}>{name}</option>
+        {#each languages as code}
+          <option value={code}>{t(`lang.${code}` as Key)}</option>
         {/each}
       </select>
     </div>
@@ -63,31 +62,31 @@
 {#if app.iureSession && !app.iureSession.loggedIn}
   <button class="connect-banner" onclick={() => (app.view = "settings")}>
     <Icon name="cloud" size={18} />
-    <span><strong>Conecta tu cuenta de Iurefficient</strong> para guardar transcripciones en tus proyectos, generar minutas con el motor del despacho y adjuntar a oportunidades del CRM.</span>
-    <span class="go">Conectar <Icon name="chevronRight" size={14} /></span>
+    <span><strong>{t("transcribe.connectTitle")}</strong> {t("transcribe.connectText")}</span>
+    <span class="go">{t("transcribe.connectGo")} <Icon name="chevronRight" size={14} /></span>
   </button>
 {/if}
 
 <div class="toolbar">
-  <button class="btn" onclick={pickFiles}><Icon name="plus" size={16} /> Agregar archivos</button>
+  <button class="btn" onclick={pickFiles}><Icon name="plus" size={16} /> {t("transcribe.addFiles")}</button>
   {#if app.running}
-    <button class="btn danger" onclick={stopQueue}><Icon name="stop" size={16} /> Detener</button>
+    <button class="btn danger" onclick={stopQueue}><Icon name="stop" size={16} /> {t("transcribe.stop")}</button>
   {:else}
     <button class="btn primary" onclick={startQueue} disabled={queued === 0}>
-      <Icon name="play" size={16} /> Transcribir{queued > 1 ? ` (${queued})` : ""}
+      <Icon name="play" size={16} /> {t("transcribe.start")}{queued > 1 ? ` (${queued})` : ""}
     </button>
   {/if}
   <span class="spacer"></span>
   {#if finished > 0}
-    <button class="btn ghost sm" onclick={clearFinished}><Icon name="trash" size={15} /> Limpiar terminados</button>
+    <button class="btn ghost sm" onclick={clearFinished}><Icon name="trash" size={15} /> {t("transcribe.clearFinished")}</button>
   {/if}
 </div>
 
 {#if app.jobs.length === 0}
   <button class="dropzone" onclick={pickFiles}>
     <div class="dz-icon"><Icon name="mic" size={30} stroke={1.8} /></div>
-    <h2>Arrastra aquí tus archivos</h2>
-    <p class="hint">o haz clic para seleccionarlos · MP3, WAV, M4A, MP4, MKV, OGG, FLAC y más</p>
+    <h2>{t("transcribe.dropHere")}</h2>
+    <p class="hint">{t("transcribe.dropHint")}</p>
   </button>
 {:else}
   <div class="split">
@@ -96,14 +95,14 @@
         <JobCard {job} selected={job.id === app.selectedJobId} onselect={() => (app.selectedJobId = job.id)} />
       {/each}
       <button class="dropzone small" onclick={pickFiles}>
-        <Icon name="plus" size={16} /> Agregar más archivos
+        <Icon name="plus" size={16} /> {t("transcribe.addMore")}
       </button>
     </div>
     <div class="detail">
       {#if selected}
         <JobDetail job={selected} />
       {:else}
-        <div class="empty hint">Selecciona un archivo para ver su transcripción.</div>
+        <div class="empty hint">{t("transcribe.selectFile")}</div>
       {/if}
     </div>
   </div>

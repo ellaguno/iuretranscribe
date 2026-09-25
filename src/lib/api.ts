@@ -10,6 +10,8 @@ export interface Settings {
   useGpu: boolean;
   threads: number;
   beamSize: number;
+  vocabulary: string;
+  corrections: Correction[];
   autoSummary: boolean;
   autoMinutes: boolean;
   openrouterApiKey: string;
@@ -34,6 +36,14 @@ export interface Settings {
   speakerSplit: boolean;
   myName: string;
   checkUpdates: boolean;
+  /** Idioma de la interfaz: "auto" (el del sistema), "en" o "es". */
+  uiLanguage: "auto" | "en" | "es";
+}
+
+/** Variantes (separadas por comas) que se reemplazan por `right` en el texto transcrito. */
+export interface Correction {
+  wrong: string;
+  right: string;
 }
 
 export interface IureEntry {
@@ -369,6 +379,9 @@ export const api = {
   stopRecording: () => invoke<RecordingResult>("stop_recording"),
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   systemInfo: () => invoke<SystemInfo>("system_info"),
+  /** Idioma efectivo de la interfaz ya resuelto por el backend. */
+  uiLanguage: () => invoke<"en" | "es">("ui_language"),
+  defaultPrompts: () => invoke<{ summary: string; minutes: string }>("default_prompts"),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
   listModels: () => invoke<ModelInfo[]>("list_models"),

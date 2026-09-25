@@ -3,6 +3,7 @@
   import { app, iureConfigured, iureFilesFor, iureLoggedIn, saveSettings, saveToCase, saveToCrm, saveToIurefficient, suggestedHours, term, toast, type Job } from "../lib/state.svelte";
   import { fmtBytes } from "../lib/format";
   import Icon from "./Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { job, onclose, onsaved }: { job: Job; onclose: () => void; onsaved?: () => void } = $props();
 
@@ -22,9 +23,9 @@
       try {
         const created = await api.iureEnsureWebdavPassword();
         app.settings = await api.getSettings();
-        if (created) toast("Se creó una contraseña de aplicación WebDAV con tu sesión", "success", 5000);
+        if (created) toast(t("picker.webdavCreated"), "success", 5000);
       } catch (e) {
-        error = `No se pudo preparar el acceso WebDAV: ${e}`;
+        error = t("picker.webdavFailed", { error: String(e) });
         loading = false;
         mode = "webdav";
         return;
@@ -135,64 +136,64 @@
     return p.split(/[\\/]/).pop() ?? p;
   }
   let destinoLabel = $derived(
-    mode === "webdav" ? (listing?.path || "la raíz") : mode === "case" ? (selectedCase ? `${selectedCase.caseNumber} · ${selectedCase.title}` : `un ${term("case").toLowerCase()}`) : selectedCrm ? selectedCrm.name : crmKind === "lead" ? "un lead" : "una oportunidad",
+    mode === "webdav" ? (listing?.path || t("picker.theRoot")) : mode === "case" ? (selectedCase ? `${selectedCase.caseNumber} · ${selectedCase.title}` : t("picker.aCase", { case: term("case").toLowerCase() })) : selectedCrm ? selectedCrm.name : crmKind === "lead" ? t("picker.aLead") : t("picker.anOpportunity"),
   );
 </script>
 
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && !uploading && onclose()}>
-  <div class="modal card" role="dialog" aria-modal="true" aria-label="Guardar en Iurefficient">
+  <div class="modal card" role="dialog" aria-modal="true" aria-label={t("picker.title")}>
     <div class="head">
-      <h2><Icon name="upload" size={17} /> Guardar en Iurefficient</h2>
-      <button class="btn icon ghost" onclick={onclose} disabled={uploading} aria-label="Cerrar"><Icon name="x" size={16} /></button>
+      <h2><Icon name="upload" size={17} /> {t("picker.title")}</h2>
+      <button class="btn icon ghost" onclick={onclose} disabled={uploading} aria-label={t("picker.close")}><Icon name="x" size={16} /></button>
     </div>
 
     <div class="modes">
-      <button class:active={mode === "case"} onclick={() => (mode = "case")} disabled={!iureLoggedIn()} title={iureLoggedIn() ? "" : "Inicia sesión en Ajustes"}><Icon name="layers" size={14} /> {term("case")}</button>
-      <button class:active={mode === "crm"} onclick={() => (mode = "crm")} disabled={!iureLoggedIn() || !app.iureSession?.crm} title={app.iureSession?.crm ? "" : "El CRM no está disponible en tu instancia o sesión"}><Icon name="sparkles" size={14} /> CRM</button>
+      <button class:active={mode === "case"} onclick={() => (mode = "case")} disabled={!iureLoggedIn()} title={iureLoggedIn() ? "" : t("picker.signInSettings")}><Icon name="layers" size={14} /> {term("case")}</button>
+      <button class:active={mode === "crm"} onclick={() => (mode = "crm")} disabled={!iureLoggedIn() || !app.iureSession?.crm} title={app.iureSession?.crm ? "" : t("picker.crmUnavailable")}><Icon name="sparkles" size={14} /> CRM</button>
       {#if iureConfigured() || iureLoggedIn()}
-        <button class:active={mode === "webdav"} onclick={openFolderMode} title="Cualquier carpeta del árbol de documentos (WebDAV)"><Icon name="folder" size={14} /> Carpeta</button>
+        <button class:active={mode === "webdav"} onclick={openFolderMode} title={t("picker.folderTitle")}><Icon name="folder" size={14} /> {t("picker.folder")}</button>
       {/if}
     </div>
 
     {#if mode === "webdav"}
       <div class="crumbs">
-        <button class="crumb" onclick={() => go("")} disabled={loading || uploading}><Icon name="folder" size={13} /> Raíz</button>
+        <button class="crumb" onclick={() => go("")} disabled={loading || uploading}><Icon name="folder" size={13} /> {t("picker.root")}</button>
         {#each crumbs as c, i}
           <span class="sep">/</span>
           <button class="crumb" onclick={() => go(crumbs.slice(0, i + 1).join("/"))} disabled={loading || uploading}>{c}</button>
         {/each}
       </div>
     {:else if mode === "case"}
-      <div class="search"><Icon name="layers" size={15} /><input class="input" placeholder="Buscar {term('case').toLowerCase()} por título, código o {term('client').toLowerCase()}" bind:value={caseQuery} oninput={onCaseInput} /></div>
+      <div class="search"><Icon name="layers" size={15} /><input class="input" placeholder={t("picker.searchCase", { case: term("case").toLowerCase(), client: term("client").toLowerCase() })} bind:value={caseQuery} oninput={onCaseInput} /></div>
     {:else}
       <div class="search">
         <div class="seg">
-          <button class:active={crmKind === "opportunity"} onclick={() => { crmKind = "opportunity"; selectedCrm = null; searchCrm(); }}>Oportunidades</button>
-          <button class:active={crmKind === "lead"} onclick={() => { crmKind = "lead"; selectedCrm = null; searchCrm(); }}>Leads</button>
+          <button class:active={crmKind === "opportunity"} onclick={() => { crmKind = "opportunity"; selectedCrm = null; searchCrm(); }}>{t("picker.opportunities")}</button>
+          <button class:active={crmKind === "lead"} onclick={() => { crmKind = "lead"; selectedCrm = null; searchCrm(); }}>{t("picker.leads")}</button>
         </div>
-        <input class="input" placeholder="Buscar por nombre u organización" bind:value={crmQuery} oninput={onCrmInput} />
+        <input class="input" placeholder={t("picker.searchCrm")} bind:value={crmQuery} oninput={onCrmInput} />
       </div>
     {/if}
 
     <div class="list scroll">
       {#if loading}
-        <div class="empty"><span class="spin"><Icon name="loader" size={18} /></span> Cargando…</div>
+        <div class="empty"><span class="spin"><Icon name="loader" size={18} /></span> {t("picker.loading")}</div>
       {:else if error}
         <div class="empty err">{error}</div>
       {:else if mode === "webdav" && listing}
         {#if !listing.entries.some((e) => e.isFolder)}
-          <div class="empty hint">Sin subcarpetas. {listing.canUpload ? "Puedes guardar aquí." : "Aquí no se puede guardar."}</div>
+          <div class="empty hint">{t("picker.noSubfolders")} {listing.canUpload ? t("picker.canSaveHere") : t("picker.cannotSaveHere")}</div>
         {/if}
         {#each listing.entries.filter((e) => e.isFolder) as e (e.path)}
           <button class="row" onclick={() => go(e.path)}>
             <Icon name="folder" size={16} />
             <span class="name">{e.name}</span>
-            {#if !e.canUpload}<span class="pill">solo lectura</span>{/if}
+            {#if !e.canUpload}<span class="pill">{t("picker.readOnly")}</span>{/if}
             <Icon name="chevronRight" size={14} />
           </button>
         {/each}
       {:else if mode === "case"}
-        {#if !cases.length}<div class="empty hint">Sin resultados.</div>{/if}
+        {#if !cases.length}<div class="empty hint">{t("picker.noResults")}</div>{/if}
         {#each cases as c (c.id)}
           <button class="row" class:selected={selectedCase?.id === c.id} onclick={() => (selectedCase = c)}>
             <Icon name="layers" size={16} />
@@ -202,7 +203,7 @@
           </button>
         {/each}
       {:else}
-        {#if !crmItems.length}<div class="empty hint">Sin resultados.</div>{/if}
+        {#if !crmItems.length}<div class="empty hint">{t("picker.noResults")}</div>{/if}
         {#each crmItems as it (it.id)}
           <button class="row" class:selected={selectedCrm?.id === it.id} onclick={() => (selectedCrm = it)}>
             <Icon name="sparkles" size={16} />
@@ -215,30 +216,30 @@
     </div>
 
     <div class="files">
-      <div class="label">Se subirán a <strong>{destinoLabel}</strong>:</div>
+      <div class="label">{t("picker.willUpload")} <strong>{destinoLabel}</strong>:</div>
       <ul>
         {#each files as f}<li>{baseName(f)}</li>{/each}
       </ul>
-      <label class="check"><input type="checkbox" bind:checked={includeMedia} disabled={uploading} /> Incluir el audio/video original</label>
+      <label class="check"><input type="checkbox" bind:checked={includeMedia} disabled={uploading} /> {t("picker.includeMedia")}</label>
       {#if mode === "case"}
-        <label class="check"><input type="checkbox" bind:checked={logHours} disabled={uploading} /> Registrar <input class="input hours" type="number" step="0.25" min="0.25" bind:value={hours} disabled={!logHours || uploading} /> horas facturables en el {term("case").toLowerCase()}</label>
+        <label class="check"><input type="checkbox" bind:checked={logHours} disabled={uploading} /> {t("picker.logHours")} <input class="input hours" type="number" step="0.25" min="0.25" bind:value={hours} disabled={!logHours || uploading} /> {t("picker.logHoursTail", { case: term("case").toLowerCase() })}</label>
       {:else if mode === "crm"}
-        <label class="check"><input type="checkbox" bind:checked={withActivity} disabled={uploading} /> Registrar una actividad de reunión ({Math.max(1, Math.round((job.result?.audioSecs ?? 0) / 60))} min) con el resumen</label>
+        <label class="check"><input type="checkbox" bind:checked={withActivity} disabled={uploading} /> {t("picker.activity", { min: Math.max(1, Math.round((job.result?.audioSecs ?? 0) / 60)) })}</label>
       {/if}
-      <p class="hint">{mode === "webdav" ? "Un archivo con el mismo nombre en la carpeta se guarda como versión nueva. Los subtítulos .srt/.vtt se suben como .txt." : "Después podrás generar la minuta con el motor de Iurefficient desde la pestaña Minuta."}</p>
+      <p class="hint">{mode === "webdav" ? t("picker.webdavNote") : t("picker.caseNote")}</p>
     </div>
 
     {#if job.iureUpload}
       <div class="progress-box">
-        <div class="hint">Subiendo {job.iureUpload.fileName || "…"} ({job.iureUpload.index + 1} de {job.iureUpload.totalFiles}){job.iureUpload.total ? ` · ${fmtBytes(job.iureUpload.sent)} / ${fmtBytes(job.iureUpload.total)}` : ""}</div>
+        <div class="hint">{t("picker.uploading", { file: job.iureUpload.fileName || "…", index: job.iureUpload.index + 1, total: job.iureUpload.totalFiles })}{job.iureUpload.total ? ` · ${fmtBytes(job.iureUpload.sent)} / ${fmtBytes(job.iureUpload.total)}` : ""}</div>
         <div class="progress" class:indeterminate={!job.iureUpload.total}><div style="width:{job.iureUpload.total ? (job.iureUpload.sent / job.iureUpload.total) * 100 : 0}%"></div></div>
       </div>
     {/if}
 
     <div class="foot">
-      <button class="btn" onclick={onclose} disabled={uploading}>Cancelar</button>
+      <button class="btn" onclick={onclose} disabled={uploading}>{t("picker.cancel")}</button>
       <button class="btn primary" onclick={save} disabled={!canSave}>
-        {#if uploading}<span class="spin"><Icon name="loader" size={15} /></span> Subiendo…{:else}<Icon name="upload" size={15} /> Guardar{/if}
+        {#if uploading}<span class="spin"><Icon name="loader" size={15} /></span> {t("picker.uploadingBtn")}{:else}<Icon name="upload" size={15} /> {t("picker.save")}{/if}
       </button>
     </div>
   </div>

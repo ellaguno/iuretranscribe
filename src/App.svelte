@@ -8,6 +8,7 @@
   import SettingsView from "./components/SettingsView.svelte";
   import Toasts from "./components/Toasts.svelte";
   import Icon from "./components/Icon.svelte";
+  import { t } from "./lib/i18n.svelte";
 
   let error = $state("");
   onMount(() => {
@@ -16,9 +17,9 @@
 </script>
 
 {#if error}
-  <div class="boot"><Icon name="alert" size={28} /><p>No se pudo iniciar la aplicación: {error}</p></div>
+  <div class="boot"><Icon name="alert" size={28} /><p>{t("boot.error", { error })}</p></div>
 {:else if !app.ready}
-  <div class="boot"><Icon name="loader" size={26} /><p>Cargando…</p></div>
+  <div class="boot"><Icon name="loader" size={26} /><p>{t("boot.loading")}</p></div>
 {:else}
   <div class="shell">
     <Sidebar />
@@ -36,7 +37,7 @@
   </div>
   {#if app.dragging}
     <div class="drop-overlay">
-      <div class="drop-box"><Icon name="download" size={36} /><p>Suelta los archivos para agregarlos a la cola</p></div>
+      <div class="drop-box"><Icon name="download" size={36} /><p>{t("drop.overlay")}</p></div>
     </div>
   {/if}
 {/if}

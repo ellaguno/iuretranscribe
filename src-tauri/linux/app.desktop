@@ -2,6 +2,7 @@
 Categories={{categories}}
 {{#if comment}}
 Comment={{comment}}
+Comment[es]=Transcripción de audio y video con Whisper
 {{/if}}
 Exec={{exec}} %U
 StartupWMClass={{exec}}

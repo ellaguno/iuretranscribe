@@ -2,6 +2,7 @@
 
 use crate::subtitles::Segment;
 use anyhow::{anyhow, Context, Result};
+use iurefficient_connect::tr;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,10 +79,10 @@ impl Engine {
         params.use_gpu(use_gpu);
         params.flash_attn(use_gpu);
         let ctx = WhisperContext::new_with_params(
-            path.to_str().ok_or_else(|| anyhow!("ruta de modelo no válida"))?,
+            path.to_str().ok_or_else(|| anyhow!(tr!("invalid model path", "ruta de modelo no válida")))?,
             params,
         )
-        .map_err(|e| anyhow!("No se pudo cargar el modelo {}: {e}", path.display()))?;
+        .map_err(|e| anyhow!(tr!("Could not load the model {}: {e}", "No se pudo cargar el modelo {}: {e}", path.display())))?;
         let ctx = Arc::new(ctx);
         *cache = Some(CachedModel { path: path.to_path_buf(), use_gpu, ctx: ctx.clone() });
         Ok(ctx)
@@ -95,12 +96,12 @@ impl Engine {
         let job_id = opts.job_id.clone();
         sink(EngineEvent::Progress(ProgressEvent { job_id: job_id.clone(), stage: "decoding".into(), percent: 0 }));
         let samples = crate::audio::decode_to_pcm16k(&opts.input)
-            .with_context(|| format!("Error al leer {}", opts.input.display()))?;
+            .with_context(|| tr!("Error reading {}", "Error al leer {}", opts.input.display()))?;
         if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("Cancelado"));
+            return Err(anyhow!(tr!("Cancelled", "Cancelado")));
         }
         if samples.len() < crate::audio::TARGET_RATE as usize / 2 {
-            return Err(anyhow!("El archivo no contiene audio suficiente para transcribir"));
+            return Err(anyhow!(tr!("The file does not contain enough audio to transcribe", "El archivo no contiene audio suficiente para transcribir")));
         }
         self.transcribe_pcm(sink, &opts, &samples, cancel, false)
     }
@@ -122,9 +123,9 @@ impl Engine {
         progress("loading", 0);
         let ctx = self.context(&opts.model_path, opts.use_gpu)?;
         if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("Cancelado"));
+            return Err(anyhow!(tr!("Cancelled", "Cancelado")));
         }
-        let mut state = ctx.create_state().map_err(|e| anyhow!("No se pudo inicializar whisper: {e}"))?;
+        let mut state = ctx.create_state().map_err(|e| anyhow!(tr!("Could not initialize whisper: {e}", "No se pudo inicializar whisper: {e}")))?;
 
         let beam = if live { 1 } else { opts.beam_size };
         let strategy = if beam > 1 {
@@ -195,9 +196,9 @@ impl Engine {
         progress("transcribing", 0);
         state
             .full(params, samples)
-            .map_err(|e| anyhow!("whisper falló: {e}"))?;
+            .map_err(|e| anyhow!(tr!("whisper failed: {e}", "whisper falló: {e}")))?;
         if cancel.load(Ordering::Relaxed) {
-            return Err(anyhow!("Cancelado"));
+            return Err(anyhow!(tr!("Cancelled", "Cancelado")));
         }
 
         let mut segments = Vec::new();
@@ -306,9 +307,9 @@ pub fn probe(model_path: &Path, use_gpu: bool) -> Result<()> {
     let mut params = WhisperContextParameters::default();
     params.use_gpu(use_gpu);
     params.flash_attn(use_gpu);
-    let ctx = WhisperContext::new_with_params(model_path.to_str().ok_or_else(|| anyhow!("ruta de modelo no válida"))?, params)
-        .map_err(|e| anyhow!("No se pudo cargar el modelo: {e}"))?;
-    let mut state = ctx.create_state().map_err(|e| anyhow!("No se pudo inicializar whisper: {e}"))?;
+    let ctx = WhisperContext::new_with_params(model_path.to_str().ok_or_else(|| anyhow!(tr!("invalid model path", "ruta de modelo no válida")))?, params)
+        .map_err(|e| anyhow!(tr!("Could not load the model: {e}", "No se pudo cargar el modelo: {e}")))?;
+    let mut state = ctx.create_state().map_err(|e| anyhow!(tr!("Could not initialize whisper: {e}", "No se pudo inicializar whisper: {e}")))?;
     let mut full = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     full.set_n_threads(2);
     full.set_language(Some("es"));
@@ -317,7 +318,7 @@ pub fn probe(model_path: &Path, use_gpu: bool) -> Result<()> {
     full.set_print_realtime(false);
     full.set_print_timestamps(false);
     let silence = vec![0.0f32; crate::audio::TARGET_RATE as usize];
-    state.full(full, &silence).map_err(|e| anyhow!("whisper falló: {e}"))?;
+    state.full(full, &silence).map_err(|e| anyhow!(tr!("whisper failed: {e}", "whisper falló: {e}")))?;
     Ok(())
 }
 

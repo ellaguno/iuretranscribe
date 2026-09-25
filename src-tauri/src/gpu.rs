@@ -9,6 +9,7 @@
 
 use crate::settings::Settings;
 use crate::transcribe;
+use iurefficient_connect::tr;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
@@ -113,14 +114,16 @@ fn notice_for(result: &str) -> Option<GpuNotice> {
     match result {
         "cpu" => Some(GpuNotice {
             level: "cpu".into(),
-            message: format!(
+            message: tr!(
+                "This computer cannot use {backend} acceleration. IureTranscribe will keep working on the CPU; for this machine it is better to install the lighter “{variant}” version (no GPU).",
                 "Esta computadora no puede usar la aceleración {backend}. IureTranscribe seguirá funcionando con el procesador; para esta máquina conviene instalar la versión «{variant}» (sin GPU), más ligera."
             ),
             url: RELEASES_URL.into(),
         }),
         "none" => Some(GpuNotice {
             level: "none".into(),
-            message: format!(
+            message: tr!(
+                "This version of IureTranscribe ({backend}) does not work on this computer: the engine starts neither with the GPU nor with the CPU. Install the “{variant}” version (no GPU) from {RELEASES_URL}.",
                 "Esta versión de IureTranscribe ({backend}) no funciona en esta computadora: el motor no arranca ni con GPU ni con procesador. Instala la versión «{variant}» (sin GPU) desde {RELEASES_URL}."
             ),
             url: RELEASES_URL.into(),

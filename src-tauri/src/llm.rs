@@ -1,6 +1,7 @@
 //! Resumen y minuta vía OpenRouter (API compatible con OpenAI).
 
 use serde::Deserialize;
+use iurefficient_connect::{lang, tr};
 use serde_json::json;
 
 #[derive(Deserialize)]
@@ -19,7 +20,7 @@ struct Message {
 
 pub async fn chat(api_key: &str, model: &str, system: &str, user: &str) -> Result<String, String> {
     if api_key.trim().is_empty() {
-        return Err("Configura tu llave de OpenRouter en Ajustes para generar resúmenes y minutas.".into());
+        return Err(tr!("Set your OpenRouter key in Settings to generate summaries and minutes.", "Configura tu llave de OpenRouter en Ajustes para generar resúmenes y minutas."));
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(600))
@@ -40,13 +41,13 @@ pub async fn chat(api_key: &str, model: &str, system: &str, user: &str) -> Resul
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("No se pudo conectar con OpenRouter: {e}"))?;
+        .map_err(|e| tr!("Could not connect to OpenRouter: {e}", "No se pudo conectar con OpenRouter: {e}"))?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     let parsed: ChatResponse = serde_json::from_str(&text)
-        .map_err(|_| format!("OpenRouter respondió {status}: {}", truncate(&text, 300)))?;
+        .map_err(|_| tr!("OpenRouter responded {status}: {}", "OpenRouter respondió {status}: {}", truncate(&text, 300)))?;
     if let Some(err) = parsed.error {
-        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("error desconocido");
+        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or(lang::pick("unknown error", "error desconocido"));
         return Err(format!("OpenRouter: {msg}"));
     }
     parsed
@@ -54,7 +55,7 @@ pub async fn chat(api_key: &str, model: &str, system: &str, user: &str) -> Resul
         .and_then(|c| c.into_iter().next())
         .and_then(|c| c.message.content)
         .filter(|c| !c.trim().is_empty())
-        .ok_or_else(|| "OpenRouter no devolvió contenido.".to_string())
+        .ok_or_else(|| tr!("OpenRouter returned no content.", "OpenRouter no devolvió contenido."))
 }
 
 fn truncate(s: &str, n: usize) -> String {

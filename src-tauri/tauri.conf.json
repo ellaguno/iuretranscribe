@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "IureTranscribe",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "identifier": "com.iurefficient.iuretranscribe",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,8 +29,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Transcripción de audio y video con Whisper",
-    "longDescription": "Transcribe audio y video localmente con Whisper (whisper.cpp), genera subtítulos SRT/VTT y, opcionalmente, resumen y minuta con un LLM.",
+    "shortDescription": "Audio and video transcription with Whisper",
+    "longDescription": "Transcribes audio and video locally with Whisper (whisper.cpp), generates SRT/VTT subtitles and, optionally, a summary and meeting minutes with an LLM.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -56,9 +56,10 @@
     "windows": {
       "nsis": {
         "languages": [
-          "Spanish",
-          "English"
+          "English",
+          "Spanish"
         ],
+        "displayLanguageSelector": false,
         "installMode": "currentUser"
       }
     },

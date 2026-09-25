@@ -6,8 +6,9 @@ mod recorder;
 mod settings;
 mod subtitles;
 mod transcribe;
+mod vocab;
 
-use iurefficient_connect::{api, rest::{Login, Session, SessionExport}, secrets, webdav::{self, WebDav}, Account};
+use iurefficient_connect::{api, lang, rest::{Login, Session, SessionExport}, secrets, tr, webdav::{self, WebDav}, Account};
 use models::{Downloads, ModelInfo};
 use recorder::Recorder;
 use serde::{Deserialize, Serialize};
@@ -197,8 +198,28 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), S
         }
     }
     to_disk.save(&state.settings_path).map_err(|e| e.to_string())?;
+    lang::set(lang::resolve(&settings.ui_language));
     *state.settings.lock().unwrap() = settings;
     Ok(())
+}
+
+/// Idioma efectivo de la interfaz ("en" / "es"), ya resuelto el automático.
+#[tauri::command]
+fn ui_language() -> &'static str {
+    lang::current().code()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DefaultPrompts {
+    summary: &'static str,
+    minutes: &'static str,
+}
+
+/// Instrucciones predeterminadas de resumen y minuta en el idioma actual.
+#[tauri::command]
+fn default_prompts() -> DefaultPrompts {
+    DefaultPrompts { summary: settings::default_summary_prompt(), minutes: settings::default_minutes_prompt() }
 }
 
 #[tauri::command]
@@ -222,7 +243,10 @@ fn delete_model(state: State<'_, AppState>, id: String) -> Result<(), String> {
     models::delete(&state.models_dir, &id)?;
     if let Some(b) = state.bundled_models_dir.as_deref() {
         if b.join(models::file_name(&id)).is_file() {
-            return Err("Ese modelo viene incluido en el instalador; se eliminó la copia descargada pero seguirá disponible.".into());
+            return Err(tr!(
+                "That model is included in the installer; the downloaded copy was deleted but it will remain available.",
+                "Ese modelo viene incluido en el instalador; se eliminó la copia descargada pero seguirá disponible."
+            ));
         }
     }
     Ok(())
@@ -270,13 +294,13 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
     let settings = state.settings.lock().unwrap().clone();
     let input = PathBuf::from(&request.path);
     if !input.is_file() {
-        return Err(format!("No existe el archivo {}", input.display()));
+        return Err(tr!("The file {} does not exist", "No existe el archivo {}", input.display()));
     }
     if !models::is_known(&settings.model_id) {
-        return Err(format!("Modelo desconocido: {}", settings.model_id));
+        return Err(tr!("Unknown model: {}", "Modelo desconocido: {}", settings.model_id));
     }
     let Some(model_path) = models::resolve(&state.models_dir, state.bundled_models_dir.as_deref(), &settings.model_id) else {
-        return Err(format!("El modelo «{}» no está descargado. Descárgalo en la sección Modelos.", settings.model_id));
+        return Err(tr!("The model “{}” is not downloaded. Download it in the Models section.", "El modelo «{}» no está descargado. Descárgalo en la sección Modelos.", settings.model_id));
     };
     let use_gpu = {
         let (app, mp, want, sp) = (app.clone(), model_path.clone(), settings.use_gpu, state.settings_path.clone());
@@ -300,20 +324,26 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
         use_gpu,
         threads: settings.threads,
         beam_size: settings.beam_size.max(1),
-        initial_prompt: None,
+        initial_prompt: vocab::initial_prompt(&settings),
     };
+    let corrector = vocab::Corrector::from_settings(&settings);
     let started = std::time::Instant::now();
+    let sink_corrector = corrector.clone();
     let sink: transcribe::EventSink = Arc::new(move |ev: EngineEvent| {
         let _ = match ev {
             EngineEvent::Progress(p) => app2.emit("job-progress", p),
-            EngineEvent::Segment(s) => app2.emit("job-segment", s),
+            EngineEvent::Segment(mut s) => {
+                s.segment.text = sink_corrector.apply(&s.segment.text);
+                app2.emit("job-segment", s)
+            }
         };
     });
     let result = tauri::async_runtime::spawn_blocking(move || engine.run(sink, opts, cancel))
         .await
-        .map_err(|e| format!("Fallo interno: {e}"))?;
+        .map_err(|e| tr!("Internal failure: {e}", "Fallo interno: {e}"))?;
     state.jobs.lock().unwrap().remove(&job_id);
-    let out = result.map_err(|e| format!("{e:#}"))?;
+    let mut out = result.map_err(|e| format!("{e:#}"))?;
+    corrector.apply_segments(&mut out.segments);
     let elapsed_secs = started.elapsed().as_secs_f64();
 
     let (outputs, output_dir, base_name) = write_outputs(&settings, &input, &out.segments)?;
@@ -334,8 +364,8 @@ async fn transcribe_file(app: AppHandle, state: State<'_, AppState>, request: Tr
 /// Escribe los formatos de salida configurados junto al archivo (o en la carpeta fija).
 fn write_outputs(settings: &Settings, input: &Path, segments: &[Segment]) -> Result<(Vec<OutputFile>, PathBuf, String), String> {
     let output_dir = resolve_output_dir(settings, input);
-    std::fs::create_dir_all(&output_dir).map_err(|e| format!("No se pudo crear la carpeta de salida: {e}"))?;
-    let base_name = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "transcripcion".into());
+    std::fs::create_dir_all(&output_dir).map_err(|e| tr!("Could not create the output folder: {e}", "No se pudo crear la carpeta de salida: {e}"))?;
+    let base_name = input.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| lang::pick("transcript", "transcripcion").into());
     let mut outputs = Vec::new();
     let mut formats = settings.formats.clone();
     if formats.is_empty() {
@@ -350,7 +380,7 @@ fn write_outputs(settings: &Settings, input: &Path, segments: &[Segment]) -> Res
             _ => continue,
         };
         let path = output_dir.join(format!("{base_name}.{ext}"));
-        std::fs::write(&path, content).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
+        std::fs::write(&path, content).map_err(|e| tr!("Could not write {}: {e}", "No se pudo escribir {}: {e}", path.display()))?;
         outputs.push(OutputFile { format: fmt, path: path.to_string_lossy().into_owned() });
     }
     Ok((outputs, output_dir, base_name))
@@ -369,11 +399,13 @@ struct LiveTranscriptRequest {
 /// Convierte la transcripción en vivo de una grabación en el resultado final
 /// (escribe SRT/TXT/… sin volver a transcribir).
 #[tauri::command]
-fn save_live_transcript(state: State<'_, AppState>, request: LiveTranscriptRequest) -> Result<TranscriptResult, String> {
+fn save_live_transcript(state: State<'_, AppState>, mut request: LiveTranscriptRequest) -> Result<TranscriptResult, String> {
     let settings = state.settings.lock().unwrap().clone();
+    // Ya vienen corregidos del evento en vivo; se repite por si cambiaron las correcciones.
+    vocab::Corrector::from_settings(&settings).apply_segments(&mut request.segments);
     let input = PathBuf::from(&request.path);
     if request.segments.is_empty() {
-        return Err("La transcripción en vivo está vacía.".into());
+        return Err(tr!("The live transcription is empty.", "La transcripción en vivo está vacía."));
     }
     let (outputs, output_dir, base_name) = write_outputs(&settings, &input, &request.segments)?;
     Ok(TranscriptResult {
@@ -404,15 +436,24 @@ fn cancel_job(state: State<'_, AppState>, job_id: String) -> bool {
 async fn generate_document(state: State<'_, AppState>, request: DocumentRequest) -> Result<DocumentResult, String> {
     let settings = state.settings.lock().unwrap().clone();
     let (system, instruction, suffix) = match request.kind.as_str() {
-        "summary" => (settings.summary_prompt.clone(), "Resume la siguiente transcripción:", "_resumen.md"),
-        "minutes" => (settings.minutes_prompt.clone(), "Redacta la minuta de la siguiente transcripción:", "_minuta.md"),
-        other => return Err(format!("Tipo de documento desconocido: {other}")),
+        "summary" => (
+            settings.effective_summary_prompt(),
+            lang::pick("Summarize the following transcription:", "Resume la siguiente transcripción:"),
+            doc_suffix("summary"),
+        ),
+        "minutes" => (
+            settings.effective_minutes_prompt(),
+            lang::pick("Write the minutes of the following transcription:", "Redacta la minuta de la siguiente transcripción:"),
+            doc_suffix("minutes"),
+        ),
+        other => return Err(tr!("Unknown document type: {other}", "Tipo de documento desconocido: {other}")),
     };
     if request.text.trim().is_empty() {
-        return Err("La transcripción está vacía.".into());
+        return Err(tr!("The transcription is empty.", "La transcripción está vacía."));
     }
     let user = match request.context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
-        Some(ctx) => format!(
+        Some(ctx) => tr!(
+            "{instruction}\n\nDetails provided by the user about the meeting (use them and give them priority over what can be inferred from the audio):\n{ctx}\n\nTranscription:\n\n{}",
             "{instruction}\n\nDatos proporcionados por el usuario sobre la reunión (úsalos y dales prioridad sobre lo que se infiera del audio):\n{ctx}\n\nTranscripción:\n\n{}",
             request.text
         ),
@@ -420,7 +461,7 @@ async fn generate_document(state: State<'_, AppState>, request: DocumentRequest)
     };
     let content = llm::chat(&settings.openrouter_api_key, &settings.openrouter_model, &system, &user).await?;
     let path = PathBuf::from(&request.output_dir).join(format!("{}{suffix}", request.base_name));
-    std::fs::write(&path, format!("{content}\n")).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
+    std::fs::write(&path, format!("{content}\n")).map_err(|e| tr!("Could not write {}: {e}", "No se pudo escribir {}: {e}", path.display()))?;
     Ok(DocumentResult { kind: request.kind, content, path: path.to_string_lossy().into_owned() })
 }
 
@@ -444,17 +485,31 @@ struct DocumentsOnDisk {
     minutes: Option<DocumentResult>,
 }
 
-/// Recupera resumen y minuta ya generados junto a la transcripción, si existen.
+/// Sufijo del archivo de resumen o minuta en el idioma actual de la interfaz.
+fn doc_suffix(kind: &str) -> &'static str {
+    match kind {
+        "summary" => lang::pick("_summary.md", "_resumen.md"),
+        _ => lang::pick("_minutes.md", "_minuta.md"),
+    }
+}
+
+/// Recupera resumen y minuta ya generados junto a la transcripción, si existen
+/// (primero con el sufijo del idioma actual y después con el del otro idioma).
 #[tauri::command]
 fn load_documents(output_dir: String, base_name: String) -> DocumentsOnDisk {
-    let read = |suffix: &str, kind: &str| {
-        let path = PathBuf::from(&output_dir).join(format!("{base_name}{suffix}"));
-        std::fs::read_to_string(&path)
-            .ok()
-            .filter(|c| !c.trim().is_empty())
-            .map(|content| DocumentResult { kind: kind.into(), content, path: path.to_string_lossy().into_owned() })
+    let read = |kind: &str| {
+        let suffixes: [&str; 2] = if kind == "summary" { ["_summary.md", "_resumen.md"] } else { ["_minutes.md", "_minuta.md"] };
+        let current = doc_suffix(kind);
+        let ordered = std::iter::once(current).chain(suffixes.into_iter().filter(|s| *s != current));
+        ordered.into_iter().find_map(|suffix| {
+            let path = PathBuf::from(&output_dir).join(format!("{base_name}{suffix}"));
+            std::fs::read_to_string(&path)
+                .ok()
+                .filter(|c| !c.trim().is_empty())
+                .map(|content| DocumentResult { kind: kind.into(), content, path: path.to_string_lossy().into_owned() })
+        })
     };
-    DocumentsOnDisk { summary: read("_resumen.md", "summary"), minutes: read("_minuta.md", "minutes") }
+    DocumentsOnDisk { summary: read("summary"), minutes: read("minutes") }
 }
 
 fn recordings_dir(state: &AppState) -> PathBuf {
@@ -496,16 +551,23 @@ async fn start_recording(app: AppHandle, state: State<'_, AppState>, speakers: O
                     use_gpu: settings.use_gpu,
                     threads: settings.threads,
                     beam_size: 1,
-                    initial_prompt: None,
+                    initial_prompt: vocab::initial_prompt(&settings),
                 },
                 chunk_secs: settings.live_chunk_secs.clamp(3.0, 30.0),
-                on_segment: Arc::new(move |seg| {
-                    let _ = app.emit("live-segment", seg);
-                }),
+                on_segment: {
+                    let corrector = vocab::Corrector::from_settings(&settings);
+                    Arc::new(move |mut seg| {
+                        seg.text = corrector.apply(&seg.text);
+                        let _ = app.emit("live-segment", seg);
+                    })
+                },
                 speakers: if settings.speaker_split { speakers } else { None },
             })
         } else {
-            live_note = Some("Transcripción en vivo desactivada: el modelo seleccionado no está descargado.".into());
+            live_note = Some(tr!(
+                "Live transcription disabled: the selected model is not downloaded.",
+                "Transcripción en vivo desactivada: el modelo seleccionado no está descargado."
+            ));
             None
         }
     } else {
@@ -666,7 +728,7 @@ async fn iure_session(state: &AppState) -> Result<Arc<Session>, String> {
         .ok()
         .flatten()
         .and_then(|j| serde_json::from_str::<SessionExport>(&j).ok())
-        .ok_or_else(|| "Inicia sesión en Iurefficient desde Ajustes".to_string())?;
+        .ok_or_else(|| tr!("Sign in to Iurefficient from Settings", "Inicia sesión en Iurefficient desde Ajustes"))?;
     let sess = Session::new(acc.clone(), &iure_user_agent()).map_err(|e| e.to_string())?;
     sess.import(&saved).await.map_err(|e| format!("{e:#}"))?;
     persist_session(&acc, &sess);
@@ -759,7 +821,7 @@ async fn iure_ensure_webdav_password(state: State<'_, AppState>) -> Result<bool,
     }
     let sess = iure_session(&state).await?;
     let host = hostname_label();
-    let created = api::create_webdav_token(&sess, &format!("IureTranscribe en {host}"), None).await.map_err(|e| format!("{e:#}"))?;
+    let created = api::create_webdav_token(&sess, &tr!("IureTranscribe on {host}", "IureTranscribe en {host}"), None).await.map_err(|e| format!("{e:#}"))?;
     if secrets::guardar(&acc, secrets::Kind::WebDav, &created.secret).is_err() {
         // Sin llavero: se conserva en los ajustes.
         let mut s = state.settings.lock().unwrap();
@@ -779,7 +841,7 @@ fn hostname_label() -> String {
         .or_else(|| std::env::var("COMPUTERNAME").ok())
         .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_string()))
         .filter(|h| !h.is_empty())
-        .unwrap_or_else(|| "este equipo".into())
+        .unwrap_or_else(|| lang::pick("this computer", "este equipo").into())
 }
 
 #[tauri::command]
@@ -845,9 +907,9 @@ async fn iure_upload_to_case(app: AppHandle, state: State<'_, AppState>, request
     }
     let time_entry_id = match (request.hours, request.case_id.as_deref()) {
         (Some(h), Some(case_id)) if h > 0.0 => Some(
-            api::add_time_entry(&sess, case_id, h, request.hours_description.as_deref().unwrap_or("Reunión transcrita con IureTranscribe"), true, None)
+            api::add_time_entry(&sess, case_id, h, request.hours_description.as_deref().unwrap_or(lang::pick("Meeting transcribed with IureTranscribe", "Reunión transcrita con IureTranscribe")), true, None)
                 .await
-                .map_err(|e| format!("Documentos subidos, pero no se registraron las horas: {e:#}"))?,
+                .map_err(|e| tr!("Documents uploaded, but the hours were not logged: {e:#}", "Documentos subidos, pero no se registraron las horas: {e:#}"))?,
         ),
         _ => None,
     };
@@ -939,17 +1001,20 @@ struct IureSummaryRequest {
 #[tauri::command]
 async fn iure_summary_via_chat(state: State<'_, AppState>, request: IureSummaryRequest) -> Result<DocumentResult, String> {
     let sess = iure_session(&state).await?;
-    let prompt = state.settings.lock().unwrap().summary_prompt.clone();
+    let prompt = state.settings.lock().unwrap().effective_summary_prompt();
     let content = api::global_chat(
         &sess,
-        "Resume la transcripción del documento adjunto siguiendo tus instrucciones. Responde sólo con el resumen en Markdown.",
+        lang::pick(
+            "Summarize the transcription in the attached document following your instructions. Reply only with the summary in Markdown.",
+            "Resume la transcripción del documento adjunto siguiendo tus instrucciones. Responde sólo con el resumen en Markdown.",
+        ),
         Some(&prompt),
         &[request.document_id.clone()],
     )
     .await
     .map_err(|e| format!("{e:#}"))?;
-    let path = PathBuf::from(&request.output_dir).join(format!("{}_resumen.md", request.base_name));
-    std::fs::write(&path, format!("{content}\n")).map_err(|e| format!("No se pudo escribir {}: {e}", path.display()))?;
+    let path = PathBuf::from(&request.output_dir).join(format!("{}{}", request.base_name, doc_suffix("summary")));
+    std::fs::write(&path, format!("{content}\n")).map_err(|e| tr!("Could not write {}: {e}", "No se pudo escribir {}: {e}", path.display()))?;
     Ok(DocumentResult { kind: "summary".into(), content, path: path.to_string_lossy().into_owned() })
 }
 
@@ -1029,7 +1094,7 @@ async fn iure_upload_to_crm(app: AppHandle, state: State<'_, AppState>, request:
             Some(
                 api::crm_activity(&sess, kind, &request.id, "meeting", &subject, request.activity_description.as_deref(), request.duration_minutes, Some(&now))
                     .await
-                    .map_err(|e| format!("Archivos adjuntados, pero no se registró la actividad: {e:#}"))?,
+                    .map_err(|e| tr!("Files attached, but the activity was not logged: {e:#}", "Archivos adjuntados, pero no se registró la actividad: {e:#}"))?,
             )
         }
         _ => None,
@@ -1054,14 +1119,14 @@ async fn apps_status(with_network: bool) -> Vec<iurefficient_connect::apps::AppS
 /// Abre un archivo con otra app de Iurefficient (p. ej. la minuta con IureEditor).
 #[tauri::command]
 fn open_with_app(app: String, path: String) -> Result<(), String> {
-    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| format!("app desconocida: {app}"))?;
+    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| tr!("unknown app: {app}", "app desconocida: {app}"))?;
     iurefficient_connect::apps::open_with(id, std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))
 }
 
 /// Lanza otra app de Iurefficient (sin archivo).
 #[tauri::command]
 fn launch_app(app: String) -> Result<(), String> {
-    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| format!("app desconocida: {app}"))?;
+    let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| tr!("unknown app: {app}", "app desconocida: {app}"))?;
     iurefficient_connect::apps::launch(id, &[]).map_err(|e| format!("{e:#}"))
 }
 
@@ -1103,7 +1168,7 @@ struct RenamedJob {
 fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String>, new_name: String) -> Result<RenamedJob, String> {
     let new_name = new_name.trim().trim_end_matches('.').to_string();
     if new_name.is_empty() || new_name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
-        return Err("El nombre no puede estar vacío ni llevar / \\ : * ? \" < > |".into());
+        return Err(tr!("The name cannot be empty or contain / \\ : * ? \" < > |", "El nombre no puede estar vacío ni llevar / \\ : * ? \" < > |"));
     }
     let src = PathBuf::from(&path);
     let old_stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1126,10 +1191,10 @@ fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String
         }
     }
     if plan.is_empty() {
-        return Err(format!("No se encontró {path}"));
+        return Err(tr!("{path} was not found", "No se encontró {path}"));
     }
     if let Some((_, to)) = plan.iter().find(|(from, to)| from != to && to.exists()) {
-        return Err(format!("Ya existe {}", to.display()));
+        return Err(tr!("{} already exists", "Ya existe {}", to.display()));
     }
     let mut moved = Vec::new();
     for (from, to) in &plan {
@@ -1138,7 +1203,7 @@ fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String
             for (a, b) in moved.iter().rev() {
                 let _ = std::fs::rename(b, a);
             }
-            return Err(format!("No se pudo renombrar {}: {e}", from.display()));
+            return Err(tr!("Could not rename {}: {e}", "No se pudo renombrar {}: {e}", from.display()));
         }
         moved.push((from.clone(), to.clone()));
     }
@@ -1153,7 +1218,7 @@ fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String
 
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("No se pudo leer {path}: {e}"))
+    std::fs::read_to_string(&path).map_err(|e| tr!("Could not read {path}: {e}", "No se pudo leer {path}: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1263,6 +1328,8 @@ pub fn run() {
             let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
             let mut settings = Settings::load(&settings_path);
+            // Idioma de la interfaz antes de cualquier mensaje (también los del conector).
+            lang::set(lang::resolve(&settings.ui_language));
             // Sin cuenta configurada: si otra app de Iurefficient (IureDav, IureEditor, IureOCR)
             // ya inició sesión en este equipo, se toma su instancia y correo; la sesión
             // y la contraseña WebDAV están en el llavero compartido.
@@ -1298,6 +1365,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             system_info,
+            ui_language,
+            default_prompts,
             check_update_notice,
             get_settings,
             save_settings,

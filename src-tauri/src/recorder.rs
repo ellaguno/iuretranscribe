@@ -9,6 +9,7 @@ use crate::audio::TARGET_RATE;
 use crate::subtitles::Segment;
 use crate::transcribe::{Engine, EngineEvent, EventSink, Options as EngineOptions};
 use anyhow::{anyhow, Result};
+use iurefficient_connect::tr;
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -114,14 +115,15 @@ impl Recorder {
     pub fn start(&self, opts: StartOptions) -> Result<PathBuf> {
         let mut slot = self.active.lock().unwrap();
         if slot.is_some() {
-            return Err(anyhow!("Ya hay una grabación en curso"));
+            return Err(anyhow!(tr!("A recording is already in progress", "Ya hay una grabación en curso")));
         }
         if !opts.capture_mic && !opts.capture_system {
-            return Err(anyhow!("Selecciona al menos una fuente: micrófono o audio del sistema"));
+            return Err(anyhow!(tr!("Select at least one source: microphone or system audio", "Selecciona al menos una fuente: micrófono o audio del sistema")));
         }
         std::fs::create_dir_all(&opts.output_dir)
-            .map_err(|e| anyhow!("No se pudo crear la carpeta de grabaciones {}: {e}", opts.output_dir.display()))?;
-        let name = format!("Grabación {}.wav", chrono::Local::now().format("%Y-%m-%d %H-%M-%S"));
+            .map_err(|e| anyhow!(tr!("Could not create the recordings folder {}: {e}", "No se pudo crear la carpeta de grabaciones {}: {e}", opts.output_dir.display())))?;
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
+        let name = tr!("Recording {stamp}.wav", "Grabación {stamp}.wav");
         let path = opts.output_dir.join(name);
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -149,7 +151,7 @@ impl Recorder {
                         stop.store(true, Ordering::Relaxed);
                         return Err(e);
                     }
-                    *self.last_error.lock().unwrap() = Some(format!("Sólo se graba el micrófono: {e}"));
+                    *self.last_error.lock().unwrap() = Some(tr!("Recording the microphone only: {e}", "Sólo se graba el micrófono: {e}"));
                 }
             }
         }
@@ -189,7 +191,7 @@ impl Recorder {
             .lock()
             .unwrap()
             .take()
-            .ok_or_else(|| anyhow!("No hay ninguna grabación en curso"))?;
+            .ok_or_else(|| anyhow!(tr!("No recording is in progress", "No hay ninguna grabación en curso")))?;
         active.stop.store(true, Ordering::Relaxed);
         for child in active.children.lock().unwrap().iter_mut() {
             let _ = child.kill();
@@ -201,7 +203,7 @@ impl Recorder {
         let samples = active
             .mixer
             .take()
-            .map(|m| m.join().unwrap_or_else(|_| Err(anyhow!("el mezclador falló"))))
+            .map(|m| m.join().unwrap_or_else(|_| Err(anyhow!(tr!("the mixer failed", "el mezclador falló")))))
             .unwrap_or(Ok(0))?;
         // El mezclador ya cerró el canal en vivo; espera a que transcriba lo pendiente.
         if let Some(w) = active.live_worker.take() {
@@ -214,7 +216,7 @@ impl Recorder {
         if samples < TARGET_RATE as u64 / 2 {
             let _ = std::fs::remove_file(&active.path);
             let detail = self.last_error.lock().unwrap().clone().unwrap_or_default();
-            return Err(anyhow!("La grabación no captó audio. {detail}"));
+            return Err(anyhow!(tr!("The recording captured no audio. {detail}", "La grabación no captó audio. {detail}")));
         }
         Ok(RecordingResult { path: active.path.to_string_lossy().into_owned(), duration_secs: samples as f64 / TARGET_RATE as f64 })
     }
@@ -250,7 +252,7 @@ fn mixer(
     split: bool,
 ) -> Result<u64> {
     let spec = hound::WavSpec { channels: 1, sample_rate: TARGET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!("No se pudo crear {}: {e}", path.display()))?;
+    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!(tr!("Could not create {}: {e}", "No se pudo crear {}: {e}", path.display())))?;
     let mut queues: [VecDeque<f32>; 2] = [VecDeque::new(), VecDeque::new()];
     let mut alive = sources;
     let mut written = 0u64;
@@ -300,8 +302,12 @@ fn mixer(
             Ok(Msg::Error(i, e)) => {
                 alive[i] = false;
                 levels[i].store(0, Ordering::Relaxed);
-                let who = if i == MIC { "micrófono" } else { "audio del sistema" };
-                *err_slot.lock().unwrap() = Some(format!("Falló la captura de {who}: {e}"));
+                let msg = if i == MIC {
+                    tr!("Microphone capture failed: {e}", "Falló la captura de micrófono: {e}")
+                } else {
+                    tr!("System audio capture failed: {e}", "Falló la captura de audio del sistema: {e}")
+                };
+                *err_slot.lock().unwrap() = Some(msg);
             }
             Err(RecvTimeoutError::Timeout) => {
                 if stop.load(Ordering::Relaxed) {
@@ -456,7 +462,7 @@ fn live_worker(rx: Receiver<LiveChunk>, live: LiveOptions, pending: Arc<AtomicU3
             }
             Err(e) => {
                 log::warn!("transcripción en vivo: {e:#}");
-                *err_slot.lock().unwrap() = Some(format!("Transcripción en vivo: {e}"));
+                *err_slot.lock().unwrap() = Some(tr!("Live transcription: {e}", "Transcripción en vivo: {e}"));
             }
         }
         Some(t0.elapsed().as_secs_f64())
@@ -581,12 +587,15 @@ fn command_exists(name: &str) -> bool {
 pub fn list_devices() -> DeviceList {
     let available = command_exists("pw-record") || command_exists("parec");
     DeviceList {
-        inputs: vec![AudioDevice { id: "default".into(), name: "Micrófono predeterminado del sistema".into(), is_default: true }],
+        inputs: vec![AudioDevice { id: "default".into(), name: tr!("System default microphone", "Micrófono predeterminado del sistema"), is_default: true }],
         system_capture: if available { "native" } else { "unavailable" },
         note: if available {
-            "El micrófono y la salida se eligen en la configuración de sonido del sistema. El audio del sistema se toma del monitor de la salida predeterminada.".into()
+            tr!(
+                "The microphone and output are chosen in the system sound settings. System audio is taken from the monitor of the default output.",
+                "El micrófono y la salida se eligen en la configuración de sonido del sistema. El audio del sistema se toma del monitor de la salida predeterminada."
+            )
         } else {
-            "Se requiere PipeWire (pw-record) o PulseAudio (parec) para grabar.".into()
+            tr!("PipeWire (pw-record) or PulseAudio (parec) is required to record.", "Se requiere PipeWire (pw-record) o PulseAudio (parec) para grabar.")
         },
         backend: "PipeWire/PulseAudio",
     }
@@ -616,15 +625,15 @@ fn spawn_source(
         c.arg(if idx == SYS { "--device=@DEFAULT_MONITOR@" } else { "--device=@DEFAULT_SOURCE@" });
         c
     } else {
-        return Err(anyhow!("Se requiere PipeWire (pw-record) o PulseAudio (parec) para grabar"));
+        return Err(anyhow!(tr!("PipeWire (pw-record) or PulseAudio (parec) is required to record", "Se requiere PipeWire (pw-record) o PulseAudio (parec) para grabar")));
     };
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow!("No se pudo iniciar la captura: {e}"))?;
-    let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("sin stdout"))?;
+        .map_err(|e| anyhow!(tr!("Could not start capturing: {e}", "No se pudo iniciar la captura: {e}")))?;
+    let mut stdout = child.stdout.take().ok_or_else(|| anyhow!(tr!("no stdout", "sin stdout")))?;
     let mut stderr = child.stderr.take();
     children.lock().unwrap().push(child);
 
@@ -652,7 +661,7 @@ fn spawn_source(
                 let _ = e.read_to_string(&mut msg);
             }
             let msg = msg.trim();
-            let _ = tx.send(Msg::Error(idx, if msg.is_empty() { "el proceso de captura terminó".into() } else { msg.to_string() }));
+            let _ = tx.send(Msg::Error(idx, if msg.is_empty() { tr!("the capture process ended", "el proceso de captura terminó") } else { msg.to_string() }));
         }
     }))
 }
@@ -676,11 +685,14 @@ pub fn list_devices() -> DeviceList {
     }
     inputs.sort_by(|a, b| b.is_default.cmp(&a.is_default).then(a.name.cmp(&b.name)));
     #[cfg(target_os = "windows")]
-    let (system_capture, note) = ("native", "El audio del sistema se captura de la salida predeterminada (loopback WASAPI).".to_string());
+    let (system_capture, note) = ("native", tr!("System audio is captured from the default output (WASAPI loopback).", "El audio del sistema se captura de la salida predeterminada (loopback WASAPI)."));
     #[cfg(not(target_os = "windows"))]
     let (system_capture, note) = (
         "virtual",
-        "macOS no permite capturar la salida directamente. Instala un dispositivo virtual (p. ej. BlackHole), crea un dispositivo de salida múltiple en Configuración de audio MIDI y elige BlackHole como micrófono para grabar la bocina.".to_string(),
+        tr!(
+            "macOS does not allow capturing the output directly. Install a virtual device (e.g. BlackHole), create a multi-output device in Audio MIDI Setup and choose BlackHole as the microphone to record the speakers.",
+            "macOS no permite capturar la salida directamente. Instala un dispositivo virtual (p. ej. BlackHole), crea un dispositivo de salida múltiple en Configuración de audio MIDI y elige BlackHole como micrófono para grabar la bocina."
+        ),
     );
     DeviceList { inputs, system_capture, note, backend: "cpal" }
 }
@@ -698,25 +710,25 @@ fn spawn_source(
     let device = if idx == SYS {
         #[cfg(target_os = "windows")]
         {
-            host.default_output_device().ok_or_else(|| anyhow!("No hay dispositivo de salida para capturar"))?
+            host.default_output_device().ok_or_else(|| anyhow!(tr!("There is no output device to capture", "No hay dispositivo de salida para capturar")))?
         }
         #[cfg(not(target_os = "windows"))]
         {
-            return Err(anyhow!("En macOS el audio del sistema requiere un dispositivo virtual como BlackHole (elígelo como micrófono)"));
+            return Err(anyhow!(tr!("On macOS system audio requires a virtual device such as BlackHole (choose it as the microphone)", "En macOS el audio del sistema requiere un dispositivo virtual como BlackHole (elígelo como micrófono)")));
         }
     } else {
         let chosen = device_id.filter(|id| id != "default").and_then(|id| {
             host.input_devices().ok()?.find(|d| d.id().map(|x| x.to_string() == id).unwrap_or(false))
         });
-        chosen.or_else(|| host.default_input_device()).ok_or_else(|| anyhow!("No hay micrófono disponible"))?
+        chosen.or_else(|| host.default_input_device()).ok_or_else(|| anyhow!(tr!("No microphone available", "No hay micrófono disponible")))?
     };
     // Loopback WASAPI: el dispositivo de salida no tiene «configuración de entrada»
     // (cpal responde «Device does not support input»); se captura con su formato de
     // mezcla, y cpal activa el loopback al abrir un flujo de entrada sobre él.
     let supported = if idx == SYS {
-        device.default_output_config().map_err(|e| anyhow!("La salida no admite captura (loopback): {e}"))?
+        device.default_output_config().map_err(|e| anyhow!(tr!("The output does not support capture (loopback): {e}", "La salida no admite captura (loopback): {e}")))?
     } else {
-        device.default_input_config().map_err(|e| anyhow!("El micrófono no admite captura: {e}"))?
+        device.default_input_config().map_err(|e| anyhow!(tr!("The microphone does not support capture: {e}", "El micrófono no admite captura: {e}")))?
     };
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.config();
@@ -748,7 +760,7 @@ fn spawn_source(
                     err_cb,
                     None,
                 )
-                .map_err(|e| anyhow!("No se pudo abrir el dispositivo: {e}"))
+                .map_err(|e| anyhow!(tr!("Could not open the device: {e}", "No se pudo abrir el dispositivo: {e}")))
             };
         }
         let stream = match sample_format {
@@ -756,9 +768,9 @@ fn spawn_source(
             cpal::SampleFormat::I16 => build!(i16, |s: i16| s as f32 / 32768.0),
             cpal::SampleFormat::U16 => build!(u16, |s: u16| (s as f32 - 32768.0) / 32768.0),
             cpal::SampleFormat::I32 => build!(i32, |s: i32| s as f32 / 2_147_483_648.0),
-            other => Err(anyhow!("Formato de muestra no soportado: {other:?}")),
+            other => Err(anyhow!(tr!("Unsupported sample format: {other:?}", "Formato de muestra no soportado: {other:?}"))),
         };
-        match stream.and_then(|s| s.play().map(|_| s).map_err(|e| anyhow!("No se pudo iniciar la captura: {e}"))) {
+        match stream.and_then(|s| s.play().map(|_| s).map_err(|e| anyhow!(tr!("Could not start capturing: {e}", "No se pudo iniciar la captura: {e}")))) {
             Ok(stream) => {
                 let _ = ready_tx.send(Ok(()));
                 while !stop.load(Ordering::Relaxed) {
@@ -774,7 +786,7 @@ fn spawn_source(
     match ready_rx.recv_timeout(Duration::from_secs(10)) {
         Ok(Ok(())) => Ok(handle),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err(anyhow!("El dispositivo de audio no respondió")),
+        Err(_) => Err(anyhow!(tr!("The audio device did not respond", "El dispositivo de audio no respondió"))),
     }
 }
 

@@ -1,6 +1,7 @@
 //! Catálogo de modelos GGML de whisper.cpp y su descarga desde Hugging Face.
 
 use futures_util::StreamExt;
+use iurefficient_connect::{lang, tr};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,30 +36,41 @@ struct CatalogEntry {
     size_mb: u64,
     quality: &'static str,
     recommended: bool,
-    description: &'static str,
+    description_en: &'static str,
+    description_es: &'static str,
 }
 
 const CATALOG: &[CatalogEntry] = &[
     CatalogEntry { id: "large-v3-turbo", name: "Large v3 Turbo", size_mb: 1620, quality: "alta", recommended: true,
-        description: "El mejor equilibrio entre calidad y velocidad. Equivale al modelo que usa el script original." },
+        description_en: "The best balance between quality and speed. Equivalent to the model used by the original script.",
+        description_es: "El mejor equilibrio entre calidad y velocidad. Equivale al modelo que usa el script original." },
     CatalogEntry { id: "large-v3-turbo-q8_0", name: "Large v3 Turbo (Q8)", size_mb: 874, quality: "alta", recommended: false,
-        description: "Turbo cuantizado a 8 bits: casi la misma calidad con la mitad de tamaño." },
+        description_en: "Turbo quantized to 8 bits: nearly the same quality at half the size.",
+        description_es: "Turbo cuantizado a 8 bits: casi la misma calidad con la mitad de tamaño." },
     CatalogEntry { id: "large-v3-turbo-q5_0", name: "Large v3 Turbo (Q5)", size_mb: 574, quality: "alta", recommended: true,
-        description: "Turbo cuantizado a 5 bits: ideal para equipos sin GPU o con poca memoria." },
+        description_en: "Turbo quantized to 5 bits: ideal for computers without a GPU or with little memory.",
+        description_es: "Turbo cuantizado a 5 bits: ideal para equipos sin GPU o con poca memoria." },
     CatalogEntry { id: "large-v3", name: "Large v3", size_mb: 3100, quality: "alta", recommended: false,
-        description: "Máxima precisión, pero mucho más lento. Requiere GPU con memoria suficiente." },
+        description_en: "Maximum accuracy, but much slower. Requires a GPU with enough memory.",
+        description_es: "Máxima precisión, pero mucho más lento. Requiere GPU con memoria suficiente." },
     CatalogEntry { id: "large-v3-q5_0", name: "Large v3 (Q5)", size_mb: 1080, quality: "alta", recommended: false,
-        description: "Large v3 cuantizado. Muy preciso; lento sin GPU." },
+        description_en: "Quantized Large v3. Very accurate; slow without a GPU.",
+        description_es: "Large v3 cuantizado. Muy preciso; lento sin GPU." },
     CatalogEntry { id: "medium", name: "Medium", size_mb: 1530, quality: "media", recommended: false,
-        description: "Buena calidad en español; más lento que Turbo con calidad similar." },
+        description_en: "Good quality in Spanish; slower than Turbo with similar quality.",
+        description_es: "Buena calidad en español; más lento que Turbo con calidad similar." },
     CatalogEntry { id: "medium-q5_0", name: "Medium (Q5)", size_mb: 539, quality: "media", recommended: false,
-        description: "Medium cuantizado a 5 bits." },
+        description_en: "Medium quantized to 5 bits.",
+        description_es: "Medium cuantizado a 5 bits." },
     CatalogEntry { id: "small", name: "Small", size_mb: 488, quality: "media", recommended: false,
-        description: "Rápido y ligero. Calidad aceptable para audio claro." },
+        description_en: "Fast and lightweight. Acceptable quality for clear audio.",
+        description_es: "Rápido y ligero. Calidad aceptable para audio claro." },
     CatalogEntry { id: "base", name: "Base", size_mb: 148, quality: "baja", recommended: false,
-        description: "Incluido en el instalador: funciona de inmediato sin descargar nada. Muy rápido; calidad básica, ideal para borradores." },
+        description_en: "Included in the installer: works right away without downloading anything. Very fast; basic quality, ideal for drafts.",
+        description_es: "Incluido en el instalador: funciona de inmediato sin descargar nada. Muy rápido; calidad básica, ideal para borradores." },
     CatalogEntry { id: "tiny", name: "Tiny", size_mb: 78, quality: "baja", recommended: false,
-        description: "El más pequeño. Sólo para pruebas rápidas." },
+        description_en: "The smallest one. Only for quick tests.",
+        description_es: "El más pequeño. Sólo para pruebas rápidas." },
 ];
 
 pub fn file_name(id: &str) -> String {
@@ -135,7 +147,7 @@ pub fn list(models_dir: &Path, bundled_dir: Option<&Path>, downloads: &Downloads
                 name: e.name.into(),
                 file_name: file_name(e.id),
                 size_mb: e.size_mb,
-                description: e.description.into(),
+                description: lang::pick(e.description_en, e.description_es).into(),
                 quality: e.quality.into(),
                 recommended: e.recommended,
                 downloaded,
@@ -165,10 +177,10 @@ fn emit(app: &AppHandle, p: DownloadProgress) {
 /// Descarga (o reanuda) un modelo. Emite eventos `model-download-progress`.
 pub async fn download(app: AppHandle, models_dir: PathBuf, id: String, downloads: Arc<Downloads>) -> Result<(), String> {
     if !is_known(&id) {
-        return Err(format!("Modelo desconocido: {id}"));
+        return Err(tr!("Unknown model: {id}", "Modelo desconocido: {id}"));
     }
     let Some(cancel) = downloads.start(&id) else {
-        return Err("Ese modelo ya se está descargando".into());
+        return Err(tr!("That model is already downloading", "Ese modelo ya se está descargando"));
     };
     let result = download_inner(&app, &models_dir, &id, cancel).await;
     downloads.finish(&id);
@@ -177,7 +189,7 @@ pub async fn download(app: AppHandle, models_dir: PathBuf, id: String, downloads
         Err(e) if e == "cancelled" => emit(&app, DownloadProgress { id: id.clone(), downloaded: 0, total: None, status: "cancelled".into(), message: None }),
         Err(e) => emit(&app, DownloadProgress { id: id.clone(), downloaded: 0, total: None, status: "error".into(), message: Some(e.clone()) }),
     }
-    result.map_err(|e| if e == "cancelled" { "Descarga cancelada".to_string() } else { e })
+    result.map_err(|e| if e == "cancelled" { tr!("Download cancelled", "Descarga cancelada") } else { e })
 }
 
 async fn download_inner(app: &AppHandle, models_dir: &Path, id: &str, cancel: Arc<AtomicBool>) -> Result<(), String> {
@@ -194,10 +206,10 @@ async fn download_inner(app: &AppHandle, models_dir: &Path, id: &str, cancel: Ar
     if existing > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={existing}-"));
     }
-    let resp = req.send().await.map_err(|e| format!("No se pudo conectar con Hugging Face: {e}"))?;
+    let resp = req.send().await.map_err(|e| tr!("Could not connect to Hugging Face: {e}", "No se pudo conectar con Hugging Face: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!("Hugging Face respondió {status}"));
+        return Err(tr!("Hugging Face responded {status}", "Hugging Face respondió {status}"));
     }
     let resuming = status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0;
     let mut downloaded = if resuming { existing } else { 0 };
@@ -220,8 +232,8 @@ async fn download_inner(app: &AppHandle, models_dir: &Path, id: &str, cancel: Ar
             let _ = file.flush().await;
             return Err("cancelled".into());
         }
-        let chunk = chunk.map_err(|e| format!("Error de red durante la descarga: {e}"))?;
-        file.write_all(&chunk).await.map_err(|e| format!("No se pudo escribir el archivo: {e}"))?;
+        let chunk = chunk.map_err(|e| tr!("Network error during the download: {e}", "Error de red durante la descarga: {e}"))?;
+        file.write_all(&chunk).await.map_err(|e| tr!("Could not write the file: {e}", "No se pudo escribir el archivo: {e}"))?;
         downloaded += chunk.len() as u64;
         if last_emit.elapsed().as_millis() > 150 {
             last_emit = std::time::Instant::now();
@@ -232,7 +244,7 @@ async fn download_inner(app: &AppHandle, models_dir: &Path, id: &str, cancel: Ar
     drop(file);
     if let Some(t) = total {
         if downloaded < t {
-            return Err(format!("Descarga incompleta ({downloaded} de {t} bytes). Vuelve a intentarlo para reanudar."));
+            return Err(tr!("Incomplete download ({downloaded} of {t} bytes). Try again to resume.", "Descarga incompleta ({downloaded} de {t} bytes). Vuelve a intentarlo para reanudar."));
         }
     }
     tokio::fs::rename(&part_path, &final_path).await.map_err(|e| e.to_string())?;

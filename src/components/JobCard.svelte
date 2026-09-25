@@ -2,18 +2,11 @@
   import { app, cancelJob, removeJob, retryJob, isActive, type Job } from "../lib/state.svelte";
   import { fmtBytes, fmtDuration, fmtSpeed } from "../lib/format";
   import Icon from "./Icon.svelte";
+  import { t, type Key } from "../lib/i18n.svelte";
 
   let { job, selected, onselect }: { job: Job; selected: boolean; onselect: () => void } = $props();
 
-  const stageLabel: Record<string, string> = {
-    queued: "En cola",
-    decoding: "Leyendo audio",
-    loading: "Cargando modelo",
-    transcribing: "Transcribiendo",
-    done: "Listo",
-    error: "Error",
-    cancelled: "Cancelado",
-  };
+  const stageLabel = (status: string) => t(`job.${status}` as Key);
   let elapsed = $derived(job.startedAt ? ((job.finishedAt ?? app.now) - job.startedAt) / 1000 : 0);
   let video = $derived(/\.(mp4|m4v|mov|mkv|webm|avi|mpe?g|3gp|wmv|ts)$/i.test(job.name));
 </script>
@@ -37,12 +30,12 @@
     </div>
     <div class="actions">
       {#if isActive(job)}
-        <button class="btn icon ghost" title="Cancelar" onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}><Icon name="x" size={15} /></button>
+        <button class="btn icon ghost" title={t("job.cancel")} onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}><Icon name="x" size={15} /></button>
       {:else}
         {#if job.status === "error" || job.status === "cancelled"}
-          <button class="btn icon ghost" title="Reintentar" onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}><Icon name="refresh" size={15} /></button>
+          <button class="btn icon ghost" title={t("job.retry")} onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}><Icon name="refresh" size={15} /></button>
         {/if}
-        <button class="btn icon ghost" title="Quitar de la lista" onclick={(e) => { e.stopPropagation(); removeJob(job.id); }}><Icon name="x" size={15} /></button>
+        <button class="btn icon ghost" title={t("job.remove")} onclick={(e) => { e.stopPropagation(); removeJob(job.id); }}><Icon name="x" size={15} /></button>
       {/if}
     </div>
   </div>
@@ -50,20 +43,20 @@
   {#if isActive(job)}
     <div class="progress" class:indeterminate={job.status !== "transcribing"}><div style="width:{job.percent}%"></div></div>
     <div class="status">
-      <span>{stageLabel[job.status]}{job.status === "transcribing" ? ` · ${job.percent}%` : ""}</span>
+      <span>{stageLabel(job.status)}{job.status === "transcribing" ? ` · ${job.percent}%` : ""}</span>
       <span>{fmtDuration(elapsed)}</span>
     </div>
   {:else if job.status === "done" && job.result}
     <div class="status">
-      <span class="pill success"><Icon name="check" size={12} stroke={3} /> Listo</span>
-      <span title="Tiempo de transcripción">{fmtDuration(job.result.elapsedSecs)} · {fmtSpeed(job.result.audioSecs, job.result.elapsedSecs)} tiempo real</span>
+      <span class="pill success"><Icon name="check" size={12} stroke={3} /> {t("job.done")}</span>
+      <span title={t("job.transcriptionTime")}>{fmtDuration(job.result.elapsedSecs)} · {t("job.realtime", { speed: fmtSpeed(job.result.audioSecs, job.result.elapsedSecs) })}</span>
     </div>
   {:else if job.status === "error"}
-    <div class="status"><span class="pill danger">Error</span><span class="errtext" title={job.error}>{job.error}</span></div>
+    <div class="status"><span class="pill danger">{t("job.error")}</span><span class="errtext" title={job.error}>{job.error}</span></div>
   {:else if job.status === "cancelled"}
-    <div class="status"><span class="pill warn">Cancelado</span></div>
+    <div class="status"><span class="pill warn">{t("job.cancelled")}</span></div>
   {:else}
-    <div class="status"><span class="pill">En cola</span></div>
+    <div class="status"><span class="pill">{t("job.queued")}</span></div>
   {/if}
 </div>
 

@@ -26,6 +26,7 @@ import {
   type TranscriptResult,
   type GpuNotice,
 } from "./api";
+import { locale, setLang, t, tn, type Key } from "./i18n.svelte";
 
 export type View = "transcribe" | "record" | "models" | "settings";
 export type JobStatus = "queued" | "decoding" | "loading" | "transcribing" | "done" | "error" | "cancelled";
@@ -45,10 +46,10 @@ export interface JobMeta {
   notes: string;
 }
 
-/** Fecha de hoy en español, p. ej. «19 de septiembre de 2026». */
+/** Fecha de hoy en el idioma de la interfaz, p. ej. «19 de septiembre de 2026». */
 export function todayLabel(): string {
   try {
-    return new Date().toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
+    return new Date().toLocaleDateString(locale(), { day: "numeric", month: "long", year: "numeric" });
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
@@ -65,13 +66,13 @@ export function metaFilledByUser(m: JobMeta): boolean {
 
 export function metaToContext(m: JobMeta): string {
   const lines: string[] = [];
-  if (m.date.trim()) lines.push(`Fecha: ${m.date.trim()}`);
-  if (m.place.trim()) lines.push(`Lugar: ${m.place.trim()}`);
+  if (m.date.trim()) lines.push(t("meta.ctxDate", { v: m.date.trim() }));
+  if (m.place.trim()) lines.push(t("meta.ctxPlace", { v: m.place.trim() }));
   if (m.participants.trim()) {
     const people = m.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean);
-    lines.push(`Participantes: ${people.join(", ")}`);
+    lines.push(t("meta.ctxParticipants", { v: people.join(", ") }));
   }
-  if (m.notes.trim()) lines.push(`Notas adicionales: ${m.notes.trim()}`);
+  if (m.notes.trim()) lines.push(t("meta.ctxNotes", { v: m.notes.trim() }));
   return lines.join("\n");
 }
 
@@ -174,6 +175,8 @@ export const app = $state({
   apps: null as AppStatus[] | null,
   /** Unidades de IureDav configuradas en este equipo. */
   davMounts: [] as DavMount[],
+  /** Instrucciones predeterminadas de resumen y minuta en el idioma actual. */
+  defaultPrompts: { summary: "", minutes: "" },
 });
 
 export function appStatus(id: AppId): AppStatus | undefined {
@@ -199,7 +202,7 @@ export async function openWithEditor(path: string): Promise<void> {
   const ed = appStatus("editor");
   if (ed && !ed.installed) {
     const { ask } = await import("@tauri-apps/plugin-dialog");
-    const go = await ask("IureEditor no está instalada en este equipo. ¿Abrir la página de descarga?", { title: "IureTranscribe", kind: "info", okLabel: "Descargar", cancelLabel: "Cancelar" });
+    const go = await ask(t("toast.editorMissing"), { title: "IureTranscribe", kind: "info", okLabel: t("toast.download"), cancelLabel: t("toast.cancel") });
     if (go) openUrl(ed.downloadUrl).catch(() => {});
     return;
   }
@@ -357,10 +360,25 @@ async function restoreJobs() {
   app.jobs = jobs;
   app.selectedJobId = [...jobs].reverse().find((j) => j.status === "done")?.id ?? jobs.at(-1)?.id ?? null;
   const interrupted = stored.filter((j) => isActive(j as Job)).length;
-  if (interrupted) toast(`${interrupted} transcripción(es) se interrumpieron al cerrar la app y volvieron a la cola`, "info", 7000);
+  if (interrupted) toast(tn("toast.interrupted", interrupted), "info", 7000);
+}
+
+/** Toma del backend el idioma resuelto de la interfaz y las instrucciones predeterminadas. */
+export async function refreshLanguage() {
+  try {
+    setLang(await api.uiLanguage());
+  } catch (e) {
+    console.warn("ui_language:", e);
+  }
+  try {
+    app.defaultPrompts = await api.defaultPrompts();
+  } catch (e) {
+    console.warn("default_prompts:", e);
+  }
 }
 
 export async function init() {
+  await refreshLanguage();
   const [settings, sys, models] = await Promise.all([api.getSettings(), api.systemInfo(), api.listModels()]);
   app.settings = settings;
   app.sys = sys;
@@ -402,8 +420,8 @@ export async function init() {
       delete app.downloads[p.id];
       refreshModels();
       const name = app.models.find((m) => m.id === p.id)?.name ?? p.id;
-      if (p.status === "done") toast(`Modelo ${name} descargado`, "success");
-      else if (p.status === "error") toast(`Error descargando ${name}: ${p.message ?? ""}`, "error", 8000);
+      if (p.status === "done") toast(t("models.downloaded", { name }), "success");
+      else if (p.status === "error") toast(t("models.downloadError", { name, error: p.message ?? "" }), "error", 8000);
     }
   });
   await listen<IureUploadProgress>("iure-upload-progress", (e) => {
@@ -414,7 +432,7 @@ export async function init() {
     app.liveSegments.push(e.payload);
   });
   await listen<string>("gpu-probe", () => {
-    toast("Comprobando si la tarjeta gráfica sirve para transcribir… puede tardar un momento.", "info", 8000);
+    toast(t("toast.gpuProbe"), "info", 8000);
   });
   await listen<GpuNotice>("gpu-notice", (e) => {
     const first = !app.gpuNotice;
@@ -458,7 +476,14 @@ export async function saveSettings(patch: Partial<Settings>) {
   try {
     await api.saveSettings($state.snapshot(app.settings));
   } catch (e) {
-    toast(`No se pudieron guardar los ajustes: ${e}`, "error");
+    toast(t("toast.settingsFailed", { error: String(e) }), "error");
+  }
+  if ("uiLanguage" in patch) {
+    // El backend ya cambió de idioma: se recargan los textos que vienen de él.
+    await refreshLanguage();
+    await refreshModels().catch(() => {});
+    if (app.devices) await loadDevices();
+    if (app.apps) void refreshApps(true);
   }
 }
 
@@ -497,7 +522,7 @@ export async function addFiles(paths: string[]): Promise<Job[]> {
   }
   app.jobs.push(...added);
   if (!app.selectedJobId && app.jobs.length) app.selectedJobId = app.jobs.at(-1)!.id;
-  if (skipped) toast(`${skipped} archivo(s) omitido(s): formato no compatible`, "error");
+  if (skipped) toast(tn("toast.skipped", skipped), "error");
   app.view = "transcribe";
   return app.jobs.filter((j) => added.some((a) => a.id === j.id));
 }
@@ -511,7 +536,7 @@ export async function loadDevices() {
   try {
     app.devices = await api.listAudioDevices();
   } catch (e) {
-    toast(`No se pudieron listar los dispositivos de audio: ${e}`, "error");
+    toast(t("record.devicesFailed", { error: String(e) }), "error");
   }
 }
 
@@ -532,12 +557,12 @@ function stopPolling() {
 /** Nombres para etiquetar [micrófono, sistema] a partir de tu nombre y los asistentes capturados. */
 export function speakerNames(): [string, string] {
   const s = app.settings;
-  const me = (s?.myName?.trim() || app.iureSession?.name?.trim() || "Yo").split(" ").slice(0, 2).join(" ");
+  const me = (s?.myName?.trim() || app.iureSession?.name?.trim() || t("record.me")).split(" ").slice(0, 2).join(" ");
   const others = app.pendingMeta.participants
     .split(/\n|,|;/)
     .map((x) => x.trim())
     .filter((x) => x && !x.toLowerCase().includes(me.toLowerCase().split(" ")[0]));
-  const other = others.length === 1 ? others[0].split(" ").slice(0, 2).join(" ") : "Interlocutor";
+  const other = others.length === 1 ? others[0].split(" ").slice(0, 2).join(" ") : t("record.otherParty");
   return [me, other];
 }
 
@@ -581,7 +606,7 @@ export async function stopRecording() {
       app.selectedJobId = job.id;
     }
     app.pendingMeta = emptyMeta();
-    toast(`Grabación guardada (${Math.round(res.durationSecs)} s)`, "success");
+    toast(t("record.saved", { secs: Math.round(res.durationSecs) }), "success");
     const s = app.settings;
     if (job && wasLive && live.length && s?.liveIsFinal) {
       // La transcripción en vivo es el resultado final: se escriben las salidas sin repetir.
@@ -635,7 +660,7 @@ export async function startQueue() {
   if (app.running) return;
   const model = selectedModel();
   if (!model?.downloaded) {
-    toast("Primero descarga un modelo en la sección Modelos", "error");
+    toast(t("toast.downloadModelFirst"), "error");
     app.view = "models";
     return;
   }
@@ -652,7 +677,7 @@ export async function startQueue() {
   } finally {
     app.running = false;
   }
-  if (done > 0 && !stopRequested) notify("IureTranscribe", done === 1 ? "Transcripción terminada" : `${done} transcripciones terminadas`);
+  if (done > 0 && !stopRequested) notify("IureTranscribe", tn("toast.transcriptionDone", done));
 }
 
 export function stopQueue() {
@@ -685,9 +710,9 @@ async function runJob(job: Job) {
   } catch (e) {
     const msg = String(e);
     job.finishedAt = Date.now();
-    job.status = /cancelad/i.test(msg) ? "cancelled" : "error";
+    job.status = /cancel/i.test(msg) ? "cancelled" : "error";
     job.error = msg;
-    if (job.status === "error") toast(`Error en ${job.name}: ${msg}`, "error", 8000);
+    if (job.status === "error") toast(t("toast.jobError", { name: job.name, error: msg }), "error", 8000);
   }
 }
 
@@ -706,7 +731,7 @@ async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number
     if (s?.autoMinutes) await generateDoc(job, "minutes");
   } catch (e) {
     job.status = "queued";
-    toast(`No se pudo guardar la transcripción en vivo: ${e}. Se transcribirá de nuevo.`, "error", 8000);
+    toast(t("toast.liveSaveFailed", { error: String(e) }), "error", 8000);
     await startQueue();
   }
 }
@@ -733,8 +758,8 @@ export function iureLoggedIn(): boolean {
 
 /** Etiquetas de la instancia («proyecto»/«caso», «cliente»/«paciente»), capitalizadas. */
 export function term(key: "case" | "cases" | "client" | "clients"): string {
-  const t = app.iureSession?.terminology;
-  const v = t?.[key] || { case: "proyecto", cases: "proyectos", client: "cliente", clients: "clientes" }[key];
+  const terms = app.iureSession?.terminology;
+  const v = terms?.[key] || t(`term.${key}` as Key);
   return v.charAt(0).toUpperCase() + v.slice(1);
 }
 
@@ -747,19 +772,19 @@ export function suggestedHours(job: Job): number {
 export async function saveToCase(job: Job, caseId: string, caseTitle: string, includeMedia: boolean, hours: number | null): Promise<boolean> {
   const files = iureFilesFor(job, includeMedia);
   if (!files.length) {
-    toast("No hay archivos que subir todavía", "error");
+    toast(t("toast.nothingToUpload"), "error");
     return false;
   }
   job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
   try {
     const transcriptPath = transcriptPathOf(job);
-    const res = await api.iureUploadToCase({ jobId: job.id, caseId, files, transcriptPath, hours, hoursDescription: hours ? `Reunión: ${job.name}` : null });
+    const res = await api.iureUploadToCase({ jobId: job.id, caseId, files, transcriptPath, hours, hoursDescription: hours ? t("toast.meeting", { name: job.name }) : null });
     job.iure = { mode: "case", folder: caseTitle, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), caseId, caseTitle, documents: res.documents, timeEntryId: res.timeEntryId, composed: [] };
-    toast(`Guardado en ${caseTitle} (${res.documents.length} documento(s)${res.timeEntryId ? ", horas registradas" : ""})`, "success", 6000);
+    toast(tn("toast.savedToCase", res.documents.length, { title: caseTitle, hours: res.timeEntryId ? t("toast.hoursLogged") : "" }), "success", 6000);
     autoComposeMinutes(job); // en segundo plano
     return true;
   } catch (e) {
-    toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);
+    toast(t("toast.iureSaveFailed", { error: String(e) }), "error", 9000);
     return false;
   } finally {
     job.iureUpload = null;
@@ -769,7 +794,7 @@ export async function saveToCase(job: Job, caseId: string, caseTitle: string, in
 export async function saveToCrm(job: Job, kind: IureCrmKind, id: string, name: string, includeMedia: boolean, withActivity: boolean): Promise<boolean> {
   const files = iureFilesFor(job, includeMedia);
   if (!files.length) {
-    toast("No hay archivos que subir todavía", "error");
+    toast(t("toast.nothingToUpload"), "error");
     return false;
   }
   job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
@@ -781,16 +806,16 @@ export async function saveToCrm(job: Job, kind: IureCrmKind, id: string, name: s
       kind,
       id,
       files,
-      activitySubject: withActivity ? `Reunión: ${job.name.replace(/\.[^.]+$/, "")}` : null,
+      activitySubject: withActivity ? t("toast.meeting", { name: job.name.replace(/\.[^.]+$/, "") }) : null,
       activityDescription: withActivity ? description : null,
       durationMinutes: withActivity ? minutes : null,
     });
-    const label = `${kind === "lead" ? "Lead" : "Oportunidad"} · ${name}`;
+    const label = `${kind === "lead" ? t("toast.lead") : t("toast.opportunity")} · ${name}`;
     job.iure = { mode: "crm", folder: label, webUrl: res.webUrl, files: res.documents.map((d) => d.fileName), savedAt: Date.now(), documents: res.documents, crm: { kind, id, name, activityId: res.activityId } };
-    toast(`Adjuntado a ${label}${res.activityId ? " y actividad registrada" : ""}`, "success", 6000);
+    toast(t("toast.attached", { label, activity: res.activityId ? t("toast.activityLogged") : "" }), "success", 6000);
     return true;
   } catch (e) {
-    toast(`No se pudo guardar en el CRM: ${e}`, "error", 9000);
+    toast(t("toast.crmFailed", { error: String(e) }), "error", 9000);
     return false;
   } finally {
     job.iureUpload = null;
@@ -806,13 +831,13 @@ export function transcriptPathOf(job: Job): string | null {
 export async function uploadTranscriptOnly(job: Job, caseId: string | null, caseTitle: string | null): Promise<boolean> {
   const path = transcriptPathOf(job);
   if (!path) {
-    toast("No hay transcripción que subir todavía", "error");
+    toast(t("toast.noTranscript"), "error");
     return false;
   }
   job.iureUpload = { fileName: "", index: 0, totalFiles: 1, sent: 0, total: 0 };
   try {
     const res = await api.iureUploadToCase({ jobId: job.id, caseId, files: [path], transcriptPath: path, hours: null, hoursDescription: null });
-    const label = caseTitle ?? "General (sin proyecto)";
+    const label = caseTitle ?? t("toast.generalNoProject");
     const prev = job.iure;
     job.iure = {
       mode: "case",
@@ -829,7 +854,7 @@ export async function uploadTranscriptOnly(job: Job, caseId: string | null, case
     };
     return true;
   } catch (e) {
-    toast(`No se pudo subir la transcripción: ${e}`, "error", 9000);
+    toast(t("toast.uploadTranscriptFailed", { error: String(e) }), "error", 9000);
     return false;
   } finally {
     job.iureUpload = null;
@@ -856,7 +881,7 @@ export async function iureWaitAiOptions(docId: string, tries = 10): Promise<Iure
 export async function composeWithIurefficient(job: Job, blueprint: { id: string; name: string; genre: string }): Promise<boolean> {
   const transcript = iureTranscriptDoc(job);
   if (!job.iure || !transcript) {
-    toast("Primero guarda la transcripción en un proyecto de Iurefficient", "error");
+    toast(t("toast.saveToProjectFirst"), "error");
     return false;
   }
   const attendees = job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean);
@@ -871,11 +896,11 @@ export async function composeWithIurefficient(job: Job, blueprint: { id: string;
     });
     if (!job.iure.composed) job.iure.composed = [];
     job.iure.composed.push({ taskId, blueprintId: blueprint.id, blueprintName: blueprint.name, genre: blueprint.genre, documentId: null, link: null, localPath: null, state: "PENDING", section: null, current: 0, total: 0, error: null, startedAt: Date.now() });
-    toast(`Generando «${blueprint.name}» en Iurefficient…`, "info", 4000);
+    toast(t("toast.generating", { name: blueprint.name }), "info", 4000);
     pollCompose(job);
     return true;
   } catch (e) {
-    toast(`No se pudo iniciar la generación: ${e}`, "error", 9000);
+    toast(t("toast.composeFailed", { error: String(e) }), "error", 9000);
     return false;
   }
 }
@@ -884,7 +909,7 @@ export async function composeWithIurefficient(job: Job, blueprint: { id: string;
 export async function summaryWithIurefficient(job: Job): Promise<boolean> {
   const transcript = iureTranscriptDoc(job);
   if (!transcript) {
-    toast("Primero sube la transcripción a Iurefficient", "error");
+    toast(t("toast.uploadFirst"), "error");
     return false;
   }
   if (job.summary.status === "loading") return false;
@@ -892,12 +917,12 @@ export async function summaryWithIurefficient(job: Job): Promise<boolean> {
   try {
     const res = await api.iureSummaryViaChat(transcript.id, job.result!.outputDir, job.result!.baseName);
     job.summary = { status: "done", content: res.content, path: res.path };
-    toast("Resumen generado con la IA de Iurefficient", "success", 6000);
-    notify("IureTranscribe", `Resumen generado con Iurefficient para ${job.name}`);
+    toast(t("toast.summaryDone"), "success", 6000);
+    notify("IureTranscribe", t("toast.summaryDoneNotify", { name: job.name }));
     return true;
   } catch (e) {
     job.summary = { status: "error", error: String(e) };
-    toast(`No se pudo generar el resumen en Iurefficient: ${e}`, "error", 9000);
+    toast(t("toast.summaryFailed", { error: String(e) }), "error", 9000);
     return false;
   }
 }
@@ -909,18 +934,18 @@ export async function autoComposeMinutes(job: Job) {
   try {
     const o = await iureWaitAiOptions(transcript.id);
     if (!o.canGenerate) {
-      toast(o.reason === "no_text" ? "Iurefficient aún no ha extraído el texto; genera la minuta desde la pestaña Minuta en un momento." : "Iurefficient no puede generar a partir de ese documento.", "info", 8000);
+      toast(o.reason === "no_text" ? t("toast.noTextYet") : t("toast.cannotGenerate"), "info", 8000);
       return;
     }
     const isMinuta = (b: IureBlueprint) => /minuta|minute|acta/i.test(`${b.genre} ${b.name}`);
     const pick = o.blueprints.find((b) => b.suggested && isMinuta(b)) ?? o.blueprints.find(isMinuta) ?? o.blueprints.find((b) => b.suggested);
     if (!pick) {
-      toast("La instancia no tiene un formato de minuta publicado; elige uno en la pestaña Minuta.", "info", 8000);
+      toast(t("toast.noMinutesFormat"), "info", 8000);
       return;
     }
     await composeWithIurefficient(job, pick);
   } catch (e) {
-    toast(`No se pudo generar la minuta automáticamente: ${e}`, "error", 8000);
+    toast(t("toast.autoMinutesFailed", { error: String(e) }), "error", 8000);
   }
 }
 
@@ -941,15 +966,15 @@ export function pollCompose(job: Job) {
         if (st.state === "SUCCESS") {
           c.documentId = st.documentId;
           c.link = st.link ? (st.link.startsWith("http") ? st.link : job.iure.webUrl.replace(/\/$/, "") + st.link) : null;
-          toast(`«${c.blueprintName}» generada en Iurefficient`, "success", 7000);
-          notify("IureTranscribe", `«${c.blueprintName}» generada en Iurefficient para ${job.name}`);
+          toast(t("toast.composed", { name: c.blueprintName }), "success", 7000);
+          notify("IureTranscribe", t("toast.composedNotify", { name: c.blueprintName, job: job.name }));
           downloadComposed(job, c);
         } else if (st.state === "FAILURE" || st.state === "REVOKED") {
-          c.error = st.error ?? "La generación falló";
-          toast(`Iurefficient no pudo generar «${c.blueprintName}»: ${c.error}`, "error", 9000);
-          notify("IureTranscribe", `Iurefficient no pudo generar «${c.blueprintName}»`);
+          c.error = st.error ?? t("toast.composeError");
+          toast(t("toast.composeFailedName", { name: c.blueprintName, error: c.error }), "error", 9000);
+          notify("IureTranscribe", t("toast.composeFailedNotify", { name: c.blueprintName }));
         } else if (Date.now() - c.startedAt > 30 * 60 * 1000) {
-          c.error = "Sin respuesta de la instancia tras 30 minutos";
+          c.error = t("toast.composeTimeout");
         }
       } catch (e) {
         c.error = String(e);
@@ -1002,10 +1027,10 @@ export async function renameJob(job: Job, stem: string): Promise<boolean> {
     job.summary.path = fix(job.summary.path) ?? undefined;
     job.minutes.path = fix(job.minutes.path) ?? undefined;
     for (const c of job.iure?.composed ?? []) c.localPath = fix(c.localPath) ?? null;
-    toast(`Renombrada a «${r.name}»`, "success", 3000);
+    toast(t("toast.renamed", { name: r.name }), "success", 3000);
     return true;
   } catch (e) {
-    toast(`No se pudo renombrar: ${e}`, "error", 8000);
+    toast(t("toast.renameFailed", { error: String(e) }), "error", 8000);
     return false;
   }
 }
@@ -1028,7 +1053,7 @@ export function iureFilesFor(job: Job, includeMedia: boolean): string[] {
 export async function saveToIurefficient(job: Job, folder: string, includeMedia: boolean): Promise<boolean> {
   const files = iureFilesFor(job, includeMedia);
   if (!files.length) {
-    toast("No hay archivos que subir todavía", "error");
+    toast(t("toast.nothingToUpload"), "error");
     return false;
   }
   job.iureUpload = { fileName: "", index: 0, totalFiles: files.length, sent: 0, total: 0 };
@@ -1038,11 +1063,11 @@ export async function saveToIurefficient(job: Job, folder: string, includeMedia:
     if (app.settings) app.settings.iureLastFolder = res.folder;
     const versions = res.uploaded.filter((u) => !u.created).length;
     const renamed = res.uploaded.filter((u) => u.renamedFrom);
-    toast(`Guardado en Iurefficient (${res.uploaded.length} archivo(s)${versions ? `, ${versions} como versión nueva` : ""})`, "success", 6000);
-    if (renamed.length) toast(`La instancia no admite ${renamed.map((u) => u.renamedFrom!.split(".").pop()).join("/")}: se guardó como ${renamed.map((u) => u.fileName).join(", ")}`, "info", 9000);
+    toast(tn("toast.savedIure", res.uploaded.length, { versions: versions ? t("toast.asNewVersion", { count: versions }) : "" }), "success", 6000);
+    if (renamed.length) toast(t("toast.renamedOnUpload", { exts: renamed.map((u) => u.renamedFrom!.split(".").pop()).join("/"), names: renamed.map((u) => u.fileName).join(", ") }), "info", 9000);
     return true;
   } catch (e) {
-    toast(`No se pudo guardar en Iurefficient: ${e}`, "error", 9000);
+    toast(t("toast.iureSaveFailed", { error: String(e) }), "error", 9000);
     return false;
   } finally {
     job.iureUpload = null;
@@ -1080,7 +1105,7 @@ export async function downloadModel(id: string) {
   } catch (e) {
     delete app.downloads[id];
     await refreshModels();
-    if (!/cancelad/i.test(String(e))) toast(String(e), "error", 8000);
+    if (!/cancel/i.test(String(e))) toast(String(e), "error", 8000);
   }
 }
 
@@ -1092,7 +1117,7 @@ export async function deleteModel(id: string) {
   try {
     await api.deleteModel(id);
     await refreshModels();
-    toast("Modelo eliminado", "info");
+    toast(t("models.deleted"), "info");
   } catch (e) {
     toast(String(e), "error");
   }
