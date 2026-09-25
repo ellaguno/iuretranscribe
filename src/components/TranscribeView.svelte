@@ -13,6 +13,8 @@
   let models = $derived(downloadedModels());
   let queued = $derived(queuedCount());
   let finished = $derived(app.jobs.filter((j) => j.status === "done" || j.status === "error" || j.status === "cancelled").length);
+  // La cola se procesa en orden de llegada, pero se muestra con la más reciente arriba.
+  let newestFirst = $derived([...app.jobs].reverse());
   let selected = $derived(app.jobs.find((j) => j.id === app.selectedJobId) ?? null);
 
   async function pickFiles() {
@@ -90,7 +92,7 @@
 {:else}
   <div class="split">
     <div class="jobs scroll">
-      {#each app.jobs as job (job.id)}
+      {#each newestFirst as job (job.id)}
         <JobCard {job} selected={job.id === app.selectedJobId} onselect={() => (app.selectedJobId = job.id)} />
       {/each}
       <button class="dropzone small" onclick={pickFiles}>
@@ -120,6 +122,7 @@
   .dz-icon { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 8px; }
   .dropzone.small { flex: none; margin: 4px 0 0; flex-direction: row; padding: 12px; font-size: 13px; font-weight: 550; border-radius: 12px; }
   .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) 1fr; grid-template-rows: minmax(0, 1fr); gap: 18px; padding: 0 26px 26px; }
+  @media (max-width: 1000px) { .split { grid-template-columns: minmax(230px, 300px) 1fr; gap: 14px; padding: 0 18px 18px; } }
   .jobs { display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
   .detail { min-width: 0; display: flex; flex-direction: column; }
   .empty { display: grid; place-items: center; height: 100%; }

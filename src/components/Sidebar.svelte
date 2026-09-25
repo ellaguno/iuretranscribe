@@ -21,22 +21,49 @@
   ];
   let model = $derived(selectedModel());
   let active = $derived(app.jobs.filter((j) => j.status !== "done" && j.status !== "error" && j.status !== "cancelled").length);
+
+  // Colapsado: se recuerda la preferencia en ventanas anchas y se fuerza al estrechar la ventana.
+  const narrow = window.matchMedia("(max-width: 1000px)");
+  let pref = (() => {
+    try {
+      return localStorage.getItem("sidebarCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  })();
+  let collapsed = $state(narrow.matches || pref);
+  $effect(() => {
+    const onChange = (e: MediaQueryListEvent) => (collapsed = e.matches || pref);
+    narrow.addEventListener("change", onChange);
+    return () => narrow.removeEventListener("change", onChange);
+  });
+  function toggle() {
+    collapsed = !collapsed;
+    if (narrow.matches) return;
+    pref = collapsed;
+    try {
+      localStorage.setItem("sidebarCollapsed", pref ? "1" : "0");
+    } catch { /* sin almacenamiento */ }
+  }
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:collapsed>
   <div class="brand">
     <img class="logo" src={iconUrl} alt="" width="40" height="40" />
-    <div>
+    <div class="label">
       <div class="name">IureTranscribe</div>
       <div class="ver">v{app.sys?.version ?? ""}</div>
     </div>
+    <button class="toggle" onclick={toggle} title={collapsed ? "Expandir la barra lateral" : "Colapsar la barra lateral"} aria-expanded={!collapsed}>
+      <Icon name="panel" size={16} />
+    </button>
   </div>
 
   <nav>
     {#each items as it}
-      <button class:active={app.view === it.id} onclick={() => (app.view = it.id)}>
+      <button class:active={app.view === it.id} onclick={() => (app.view = it.id)} title={collapsed ? it.label : undefined}>
         <Icon name={it.icon} />
-        <span>{it.label}</span>
+        <span class="label">{it.label}</span>
         {#if it.id === "transcribe" && active > 0}
           <span class="badge">{active}</span>
         {/if}
@@ -48,53 +75,64 @@
   </nav>
 
   <div class="links">
-    <div class="links-title">Iurefficient</div>
+    <div class="links-title label">Iurefficient</div>
     {#each links as l}
-      <button onclick={() => go(l.url)} title={l.url}>
+      <button onclick={() => go(l.url)} title={collapsed ? `${l.label}: ${l.url}` : l.url}>
         <Icon name={l.icon} size={15} />
-        <span>{l.label}</span>
-        <Icon name="external" size={12} />
+        <span class="label">{l.label}</span>
+        <span class="label ext"><Icon name="external" size={12} /></span>
       </button>
     {/each}
   </div>
 
   {#if app.updateNotice}
-    <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title="Abrir la página de descarga">
+    <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title={collapsed ? `Nueva versión ${app.updateNotice.version}` : "Abrir la página de descarga"}>
       <Icon name="download" size={14} />
-      <span>Nueva versión {app.updateNotice.version}</span>
+      <span class="label">Nueva versión {app.updateNotice.version}</span>
     </button>
   {/if}
   {#if app.gpuNotice}
     <button class="update gpu" class:bad={app.gpuNotice.level === "none"} onclick={() => openUrl(app.gpuNotice!.url)} title={app.gpuNotice.message}>
       <Icon name="download" size={14} />
-      <span>{app.gpuNotice.level === "none" ? "Esta versión no funciona aquí: descarga la versión sin GPU" : "Sin GPU: conviene la versión sin GPU"}</span>
+      <span class="label">{app.gpuNotice.level === "none" ? "Esta versión no funciona aquí: descarga la versión sin GPU" : "Sin GPU: conviene la versión sin GPU"}</span>
     </button>
   {/if}
   <div class="foot">
     <button class="row conn" class:ok={app.iureSession?.loggedIn} onclick={() => (app.view = "settings")} title={app.iureSession?.loggedIn ? "Conectado a Iurefficient" : "Conectar con Iurefficient"}>
       <Icon name="cloud" size={15} />
-      <span>{app.iureSession?.loggedIn ? `Iurefficient: ${app.iureSession.name ?? "conectado"}` : "Conectar con Iurefficient"}</span>
+      <span class="label">{app.iureSession?.loggedIn ? `Iurefficient: ${app.iureSession.name ?? "conectado"}` : "Conectar con Iurefficient"}</span>
     </button>
-    <div class="row">
+    <div class="row" title={collapsed ? (app.sys?.backend ?? "") : undefined}>
       <Icon name="cpu" size={15} />
-      <span>{app.sys?.backend ?? "…"}</span>
+      <span class="label">{app.sys?.backend ?? "…"}</span>
       {#if app.sys?.backend === "CPU" && app.settings?.useGpu}
-        <span class="hint" title="Este binario se compiló sin soporte de GPU">sin GPU</span>
+        <span class="hint label" title="Este binario se compiló sin soporte de GPU">sin GPU</span>
       {/if}
     </div>
-    <div class="row">
+    <div class="row" title={collapsed ? (model ? model.name : "Sin modelo") : undefined}>
       <Icon name="layers" size={15} />
       {#if model}
-        <span class:warn={!model.downloaded}>{model.name}{model.downloaded ? "" : " (no descargado)"}</span>
+        <span class="label" class:warn={!model.downloaded}>{model.name}{model.downloaded ? "" : " (no descargado)"}</span>
       {:else}
-        <span>Sin modelo</span>
+        <span class="label">Sin modelo</span>
       {/if}
     </div>
   </div>
 </aside>
 
 <style>
-  .sidebar { display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; gap: 16px; }
+  .sidebar { width: 224px; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); padding: 18px 12px; gap: 16px; overflow-x: hidden; overflow-y: auto; transition: width 0.18s ease; }
+  .toggle { margin-left: auto; padding: 6px; border-radius: 8px; color: var(--muted); display: grid; place-items: center; }
+  .toggle:hover { background: var(--surface-2); color: var(--accent); }
+  .sidebar.collapsed { width: 64px; padding: 18px 8px; }
+  .collapsed .label { display: none; }
+  .collapsed .brand { flex-direction: column; padding: 4px 0; gap: 8px; }
+  .collapsed .toggle { margin-left: 0; }
+  .collapsed nav button, .collapsed .links button, .collapsed .update { justify-content: center; position: relative; }
+  .collapsed .update { margin: 0 0 6px; }
+  .collapsed .badge { position: absolute; top: 2px; right: 2px; margin: 0; padding: 0 5px; font-size: 10px; }
+  .collapsed .recdot { position: absolute; top: 5px; right: 6px; margin: 0; }
+  .collapsed .foot { padding: 10px 0; align-items: center; }
   .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
   .logo { width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; }
   .name { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
@@ -109,7 +147,7 @@
   .links { margin-top: auto; display: flex; flex-direction: column; gap: 1px; padding: 6px 0; }
   .links-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 4px 10px 6px; }
   .links button { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; color: var(--text-2); font-size: 13px; text-align: left; }
-  .links button :global(svg:last-child) { margin-left: auto; opacity: 0.5; }
+  .links .ext { margin-left: auto; opacity: 0.5; display: flex; }
   .links button:hover { background: var(--surface-2); color: var(--accent); }
   .foot { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
   .row { display: flex; align-items: center; gap: 7px; overflow: hidden; }

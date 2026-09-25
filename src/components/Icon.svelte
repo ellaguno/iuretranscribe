@@ -32,6 +32,7 @@
     moon: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z",
     monitor: "M2 4h20v12H2zM8 20h8M12 16v4",
     chevron: "m6 9 6 6 6-6",
+    panel: "M3 5h18v14H3zM9 5v14",
     chevronRight: "m9 6 6 6-6 6",
     upload: "M12 21V9M6 15l6-6 6 6M4 3h16",
     cloud: "M17.5 19a4.5 4.5 0 0 0 .4-9A7 7 0 0 0 4.3 12.6 3.5 3.5 0 0 0 6 19z",

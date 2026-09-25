@@ -355,7 +355,7 @@ async function restoreJobs() {
       }),
   );
   app.jobs = jobs;
-  app.selectedJobId = jobs.find((j) => j.status === "done")?.id ?? jobs[0]?.id ?? null;
+  app.selectedJobId = [...jobs].reverse().find((j) => j.status === "done")?.id ?? jobs.at(-1)?.id ?? null;
   const interrupted = stored.filter((j) => isActive(j as Job)).length;
   if (interrupted) toast(`${interrupted} transcripción(es) se interrumpieron al cerrar la app y volvieron a la cola`, "info", 7000);
 }
@@ -496,7 +496,7 @@ export async function addFiles(paths: string[]): Promise<Job[]> {
     });
   }
   app.jobs.push(...added);
-  if (!app.selectedJobId && app.jobs.length) app.selectedJobId = app.jobs[0].id;
+  if (!app.selectedJobId && app.jobs.length) app.selectedJobId = app.jobs.at(-1)!.id;
   if (skipped) toast(`${skipped} archivo(s) omitido(s): formato no compatible`, "error");
   app.view = "transcribe";
   return app.jobs.filter((j) => added.some((a) => a.id === j.id));
@@ -603,12 +603,12 @@ export function removeJob(id: string) {
   const job = app.jobs[i];
   if (isActive(job)) return;
   app.jobs.splice(i, 1);
-  if (app.selectedJobId === id) app.selectedJobId = app.jobs[0]?.id ?? null;
+  if (app.selectedJobId === id) app.selectedJobId = app.jobs.at(-1)?.id ?? null;
 }
 
 export function clearFinished() {
   app.jobs = app.jobs.filter((j) => isActive(j) || j.status === "queued");
-  if (!app.jobs.some((j) => j.id === app.selectedJobId)) app.selectedJobId = app.jobs[0]?.id ?? null;
+  if (!app.jobs.some((j) => j.id === app.selectedJobId)) app.selectedJobId = app.jobs.at(-1)?.id ?? null;
 }
 
 export function retryJob(id: string) {
