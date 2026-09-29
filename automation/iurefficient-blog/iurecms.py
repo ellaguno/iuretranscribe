@@ -7,10 +7,13 @@ Subcomandos:
   publish ARTICULO.json        Sube la imagen y crea el artículo (español e inglés).
   update  SLUG CAMBIOS.json    Cambia campos de un artículo existente (también el slug).
 
-Credenciales: variables IUREF_CMS_USER / IUREF_CMS_PASS.
+Credenciales: IUREF_CMS_TOKEN, token de la API de cms_simple (≥ 1.37; renombrar con `update` pide
+≥ 1.37.1), creado en Usuarios → Acceso por API con acceso a «articulos». Sin token se usa el método
+anterior (login con IUREF_CMS_USER / IUREF_CMS_PASS y formularios del admin), sólo como respaldo.
 Requiere Pillow sólo para `hero`.
 """
 import argparse
+import base64
 import html
 import http.client
 import http.cookiejar
@@ -35,12 +38,109 @@ VERSION_TITLE = re.compile(r"\bv(\d+)\.(\d+)\b")
 VERSION_FULL = re.compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 
 
-class Cms:
+UA = "iurecms/1.1 (+publicador de novedades)"  # el servidor responde 403 al User-Agent por omisión de urllib
+
+
+class ApiCms:
+    """cms_simple ≥ 1.37: /admin/api/ con token. Mismo contrato que FormCms."""
+
+    def __init__(self, token):
+        self.token = token
+
+    def call(self, method, path, body=None, ctype=None, tries=4):
+        headers = {"User-Agent": UA, "X-CMS-Token": self.token, "Accept": "application/json"}
+        if ctype:
+            headers["Content-Type"] = ctype
+        for i in range(tries):
+            req = urllib.request.Request(BASE + "/admin/api/" + path, data=body, method=method, headers=headers)
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, json.loads(r.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                raw = e.read().decode("utf-8", "replace")
+                try:
+                    return e.code, json.loads(raw)
+                except ValueError:
+                    raise SystemExit(f"La API respondió {e.code} sin JSON ({path}): {raw[:300]}")
+            except (http.client.IncompleteRead, ConnectionError, urllib.error.URLError):
+                # sólo se reintentan lecturas; repetir un POST podría guardar dos veces
+                if i == tries - 1 or method != "GET":
+                    raise
+                time.sleep(2 ** i)
+
+    def login(self):
+        code, j = self.call("GET", "")
+        if code != 200 or not j.get("ok"):
+            raise SystemExit(f"Token rechazado por el CMS: {j.get('error', code)}")
+        if "*" not in j.get("types", []) and TYPE not in j.get("types", []):
+            raise SystemExit(f"El token no tiene acceso a «{TYPE}»")
+
+    def articles(self):
+        """[(slug, title, status)] de todos los artículos (incluye borradores)."""
+        out, page = [], 1
+        while True:
+            code, j = self.call("GET", f"items/{TYPE}?per=200&page={page}")
+            if code != 200:
+                raise SystemExit(f"No pude leer el listado: {j.get('error', code)}")
+            out += [(it["slug"], it["title"], it["status"]) for it in j["items"]]
+            if page >= j["pages"]:
+                return out
+            page += 1
+
+    def get_item(self, slug):
+        code, j = self.call("GET", f"items/{TYPE}/{urllib.parse.quote(slug)}")
+        return j["item"] if code == 200 else None
+
+    def body_of(self, slug):
+        b = (self.get_item(slug) or {}).get("body", "")
+        return b.get("es", "") if isinstance(b, dict) else str(b)
+
+    def exists(self, slug):
+        return self.get_item(slug) is not None
+
+    def upload(self, path):
+        boundary = uuid.uuid4().hex
+        ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        with open(path, "rb") as f:
+            data = f.read()
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{os.path.basename(path)}"\r\n'
+                f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        code, j = self.call("POST", "upload", body, f"multipart/form-data; boundary={boundary}")
+        if not j.get("path"):
+            raise SystemExit(f"La subida de imagen falló: {j.get('error', code)}")
+        return j["path"]
+
+    def save_article(self, a, slug=None):
+        """Crea (slug=None) o modifica el artículo `slug`; sólo se tocan las claves presentes en `a`."""
+        item = api_item(a)
+        if slug:
+            if not self.exists(slug):
+                raise SystemExit(f"No encontré el artículo {slug}")
+            item["slug"] = slug
+            if a.get("slug") and a["slug"] != slug:
+                item["new_slug"] = a["slug"]
+        else:
+            item["slug"] = a["slug"]
+        # Blindaje del panel (=?rb64?=, base64 invertido): el firewall del hosting no ve HTML en el cuerpo.
+        raw = json.dumps(item, ensure_ascii=False).encode("utf-8")
+        body = ("=?rb64?=" + base64.b64encode(raw).decode("ascii")[::-1]).encode("ascii")
+        code, j = self.call("POST", f"items/{TYPE}", body, "text/plain; charset=utf-8")
+        if not j.get("ok"):
+            raise SystemExit(f"El CMS no guardó el artículo: {j.get('errors') or j.get('error') or code}")
+        if not slug and j.get("created") is False:
+            raise SystemExit(f"El slug {a['slug']} ya existía y se actualizó en vez de crearse; revísalo")
+        if item.get("new_slug") and j.get("renamed_from") != slug:
+            raise SystemExit(f"Se guardaron los cambios pero el CMS no renombró {slug} (renombrar por la API pide cms_simple ≥ 1.37.1)")
+        return j["item"]["slug"]
+
+
+class FormCms:
+    """Respaldo para cms_simple < 1.37 o sin token: imita al navegador en el admin."""
+
     def __init__(self):
         self.jar = http.cookiejar.CookieJar()
         self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
-        # El servidor responde 403 al User-Agent por omisión de urllib.
-        self.op.addheaders = [("User-Agent", "iurecms/1.0 (+publicador de novedades)")]
+        self.op.addheaders = [("User-Agent", UA)]
         self.csrf = None
 
     def get(self, path, tries=4):
@@ -113,6 +213,12 @@ class Cms:
         if not j.get("path"):
             raise SystemExit(f"La subida de imagen falló: {resp[:300]}")
         return j["path"]
+
+    def exists(self, slug):
+        return slug in {s for s, _, _ in self.articles()}
+
+    def save_article(self, a, slug=None):
+        return self.save(article_fields(a), slug=slug)
 
     def save(self, changes, slug=None):
         """Guarda un artículo: parte de los valores actuales del formulario (vacíos si es nuevo)
@@ -200,6 +306,29 @@ def article_fields(a):
     return f
 
 
+def api_item(a):
+    """Cuerpo JSON de la API a partir del JSON del artículo (claves ausentes = no se tocan)."""
+    item = {}
+    for lang, src in (("es", a), ("en", a.get("en") or {})):
+        for key, field in (("title", "title"), ("excerpt", "excerpt"), ("body_html", "body"),
+                           ("seo_title", "seo_title"), ("seo_desc", "seo_desc"), ("tags", "tags")):
+            if key in src:
+                item.setdefault(field, {})[lang] = src[key]
+    for key in ("date", "status", "author", "category", "image", "brand"):
+        if key in a:
+            item[key] = a[key]
+    return item
+
+
+def connect():
+    tok = os.environ.get("IUREF_CMS_TOKEN", "").strip()
+    cms = ApiCms(tok) if tok else FormCms()
+    if not tok:
+        print("Aviso: sin IUREF_CMS_TOKEN; uso el login del admin (respaldo).", file=sys.stderr)
+    cms.login()
+    return cms
+
+
 def vkey(s):
     return tuple(int(x) for x in s.split("."))
 
@@ -211,8 +340,7 @@ def repo_versions(repo):
 
 
 def cmd_status(args):
-    cms = Cms()
-    cms.login()
+    cms = connect()
     covered, existing = set(), []
     for slug, title, status in cms.articles():
         m = VERSION_TITLE.search(title)
@@ -388,7 +516,7 @@ def cmd_hero(args):
     print(args.out)
 
 
-DEFAULTS = {"status": "published", "author": "Iurefficient", "category": "novedades-de-version", "brand": "derecho"}
+DEFAULTS = {"status": "published", "author": "Iurefficient", "category": "Novedades de versión", "brand": "derecho"}
 
 
 def cmd_publish(args):
@@ -400,13 +528,12 @@ def cmd_publish(args):
     for k in ("title", "excerpt", "body_html"):
         if not (a.get("en") or {}).get(k):
             raise SystemExit(f"Falta en.{k} (versión en inglés) en {args.article}")
-    cms = Cms()
-    cms.login()
-    if a["slug"] in {s for s, _, _ in cms.articles()}:
+    cms = connect()
+    if cms.exists(a["slug"]):
         raise SystemExit(f"Ya existe un artículo con slug {a['slug']}; no publico dos veces")
     if a.get("image_file"):
         a["image"] = cms.upload(a["image_file"])
-    slug = cms.save(article_fields({**DEFAULTS, **a}))
+    slug = cms.save_article({**DEFAULTS, **a})
     print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}", "image": a.get("image", "")}, ensure_ascii=False))
 
 
@@ -414,11 +541,10 @@ def cmd_update(args):
     """Modifica un artículo existente: sólo cambian las claves presentes en el JSON (slug incluido)."""
     with open(args.article, encoding="utf-8") as f:
         a = json.load(f)
-    cms = Cms()
-    cms.login()
+    cms = connect()
     if a.get("image_file"):
         a["image"] = cms.upload(a["image_file"])
-    slug = cms.save(article_fields(a), slug=args.slug)
+    slug = cms.save_article(a, slug=args.slug)
     print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}"}, ensure_ascii=False))
 
 

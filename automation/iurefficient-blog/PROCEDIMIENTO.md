@@ -7,7 +7,12 @@ una vez al día, sólo aparecen versiones nuevas.
 
 ## Requisitos
 
-- Variables de entorno `IUREF_CMS_USER` y `IUREF_CMS_PASS` (cuenta del admin de cms_simple).
+- Variable de entorno `IUREF_CMS_TOKEN`: token de la API de cms_simple (≥ 1.37; renombrar con
+  `update` pide ≥ 1.37.1), creado en **Usuarios → Acceso por API** del admin con acceso a
+  «Artículos». `iurecms.py` usa entonces `/admin/api/` (listado, lectura, subida y guardado en
+  JSON) en lugar de los formularios.
+- Respaldo, sólo si no hay token: `IUREF_CMS_USER` y `IUREF_CMS_PASS` (cuenta del admin); el
+  script inicia sesión e imita al navegador, como antes.
 - `pip install pillow` para generar la imagen.
 - Clon de `ellaguno/expert-collaborator` (basta `--depth 1`; las etiquetas se leen del remoto).
 
@@ -67,6 +72,9 @@ una vez al día, sólo aparecen versiones nuevas.
 
 ## Notas
 
-- Categoría `novedades-de-version`, autor `Iurefficient`, cabecera `derecho`, estado
+- Categoría «Novedades de versión», autor `Iurefficient`, cabecera `derecho`, estado
   `published`: son los valores por omisión de `publish`.
 - El servidor rechaza con 403 el User-Agent por omisión de Python; `iurecms.py` ya envía uno propio.
+- Por la API, el cuerpo va blindado como lo hace el panel (`=?rb64?=`, base64 invertido) para que
+  el firewall del hosting no lo corte por llevar HTML. La API crea o actualiza según exista el slug;
+  `publish` comprueba antes que no exista y se detiene si la respuesta dice que no se creó.
