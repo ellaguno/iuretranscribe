@@ -124,3 +124,25 @@ qué funciones mostrar). Para añadir temas, agrégalos al final de su sector en
 6. **Publicar** con `publish`, añadiendo al JSON `"category": "<categoria>"` y
    `"brand": "<cabecera>"`, más la versión en inglés en `en` (con los nombres de la interfaz en
    inglés de `instance/frontend/messages/en.json`). Verificar ES y EN como en las novedades.
+
+---
+
+# LinkedIn — un post por cada artículo de mejores prácticas
+
+Sólo para los artículos de **mejores prácticas** (nunca los de versiones), el mismo día que se
+publican. Se publica en el perfil personal de Eduardo con `linkedin.py` (token en
+`LINKEDIN_ACCESS_TOKEN`, permisos `openid`, `profile` y `w_member_social`; caduca cada 60 días).
+
+1. **Escribir el post** siguiendo `VOZ_LINKEDIN.md` al pie de la letra (léelo completo cada vez).
+   Guardarlo como JSON: `{"text": …, "url": <URL del artículo en español>, "title": <título del
+   artículo>, "description": <una frase>, "image_url": <URL de la imagen destacada publicada>}`.
+2. **Revisar en seco**: `python3 linkedin.py post post.json --dry-run`.
+3. **Modo revisión (hasta el 13 de octubre de 2026 inclusive): NO publicar.** Poner el texto
+   completo del post en el resumen final y pedir a Eduardo que responda «publícalo» (o sus
+   cambios) en esta misma sesión. Sólo cuando lo pida: aplicar los cambios y publicar con
+   `python3 linkedin.py post post.json`, una sola vez.
+4. **Modo directo (desde el 14 de octubre de 2026)**: publicar con `linkedin.py post` y poner en el
+   resumen el texto y el enlace del post.
+5. Si LinkedIn responde 401, el token caducó: no reintentar y avisar en el resumen que hay que
+   renovarlo (Token generator de LinkedIn Developers, app Iurefficient).
+6. Nunca publicar dos veces el mismo post: si la respuesta fue 201 o trae un `urn`, ya está.
