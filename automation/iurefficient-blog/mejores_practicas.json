@@ -1,0 +1,316 @@
+{
+ "_nota": "Plan de artículos de mejores prácticas. iurecms.py practicas elige el siguiente. Se pueden añadir temas al final de cada sector.",
+ "cada_dias": 2,
+ "categoria": "Mejores prácticas",
+ "rotacion": [
+  "ti",
+  "pmo",
+  "consultoria",
+  "fiscal",
+  "derecho"
+ ],
+ "sectores": {
+  "ti": {
+   "nombre": "TI",
+   "cabecera": "teams"
+  },
+  "pmo": {
+   "nombre": "PMO",
+   "cabecera": "teams"
+  },
+  "consultoria": {
+   "nombre": "Consultoría",
+   "cabecera": "teams"
+  },
+  "fiscal": {
+   "nombre": "Fiscal",
+   "cabecera": "teams"
+  },
+  "derecho": {
+   "nombre": "Derecho",
+   "cabecera": "derecho"
+  }
+ },
+ "temas": [
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-tickets-con-sla",
+   "titulo": "Tickets con SLA que se cumplen: clasificar, priorizar y medir",
+   "menciona_iurefficient": true,
+   "funciones": "Tickets y su tablero, reportes programados"
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-inventario-de-activos",
+   "titulo": "Inventario de activos de TI: lo que no está registrado no se puede proteger",
+   "menciona_iurefficient": true,
+   "funciones": "Inventario, asignación a personas y proyectos"
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-respaldos-3-2-1",
+   "titulo": "Respaldos 3-2-1 y la prueba de restauración que casi nadie hace",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-gestion-de-cambios",
+   "titulo": "Cambios en producción sin sustos: solicitud, aprobación y ventana",
+   "menciona_iurefficient": true,
+   "funciones": "Órdenes de cambio, tareas, deshacer"
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-base-de-conocimiento",
+   "titulo": "Una base de conocimiento que el equipo sí consulta",
+   "menciona_iurefficient": true,
+   "funciones": "Biblioteca de conocimiento, chat que cita fuentes"
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-minimo-privilegio",
+   "titulo": "Mínimo privilegio: revisar accesos antes de que alguien lo haga por ti",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-proyectos-de-implementacion",
+   "titulo": "Implementar software para un cliente: del arranque a la puesta en marcha",
+   "menciona_iurefficient": true,
+   "funciones": "Plan de trabajo, Gantt, línea base, portal externo"
+  },
+  {
+   "sector": "ti",
+   "slug": "mejores-practicas-ti-postmortem-sin-culpables",
+   "titulo": "El postmortem sin culpables: aprender de una caída sin buscar a quién colgarla",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-linea-base",
+   "titulo": "La línea base: sin ella no hay desviación que medir",
+   "menciona_iurefficient": true,
+   "funciones": "Línea base, Gantt, hitos"
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-matriz-de-riesgos",
+   "titulo": "Una matriz de riesgos que se usa, no que se archiva",
+   "menciona_iurefficient": true,
+   "funciones": "Matriz de riesgos, el asistente aprende de los riesgos"
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-reunion-semanal-de-estado",
+   "titulo": "La reunión semanal de estado en 30 minutos",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-control-de-cambios",
+   "titulo": "Control de cambios: el alcance se mueve, la promesa queda escrita",
+   "menciona_iurefficient": true,
+   "funciones": "Órdenes de cambio, presupuesto por proyecto"
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-capacidad-y-carga",
+   "titulo": "¿Quién puede con más? Planear con la capacidad real del equipo",
+   "menciona_iurefficient": true,
+   "funciones": "Mapa de calor de carga, perfiles y plazas"
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-priorizar-la-cartera",
+   "titulo": "Priorizar la cartera cuando todo es urgente",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-minutas-y-compromisos",
+   "titulo": "De la reunión a los compromisos: minutas que se convierten en tareas",
+   "menciona_iurefficient": true,
+   "funciones": "Minuta desde la grabación, compromisos a tareas"
+  },
+  {
+   "sector": "pmo",
+   "slug": "mejores-practicas-pmo-lecciones-aprendidas",
+   "titulo": "Lecciones aprendidas que llegan al siguiente proyecto",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-propuestas-que-se-ganan",
+   "titulo": "Propuestas que se ganan: reutilizar sin copiar y pegar",
+   "menciona_iurefficient": true,
+   "funciones": "CRM, plantillas y formatos, biblioteca de conocimiento"
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-registro-de-horas",
+   "titulo": "Registrar horas sin que duela: la base de la rentabilidad",
+   "menciona_iurefficient": true,
+   "funciones": "Hoja de horas semanal, autorización"
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-alcance-por-escrito",
+   "titulo": "El alcance por escrito: cómo evitar el «ya que estás»",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-embudo-comercial",
+   "titulo": "Un embudo comercial con seguimientos que no se olvidan",
+   "menciona_iurefficient": true,
+   "funciones": "CRM: oportunidades, seguimientos, resumen del día"
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-rentabilidad-por-proyecto",
+   "titulo": "Rentabilidad por proyecto: horas, tarifas y presupuesto a la vista",
+   "menciona_iurefficient": true,
+   "funciones": "Horas capturadas, tarifas, presupuesto, reportes"
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-arranque-con-el-cliente",
+   "titulo": "El arranque con un cliente nuevo: la primera semana decide la relación",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-entregables-y-portal",
+   "titulo": "Entregables que el cliente encuentra: compartir, revisar y firmar",
+   "menciona_iurefficient": true,
+   "funciones": "Portal externo, compartir documentos, firma electrónica"
+  },
+  {
+   "sector": "consultoria",
+   "slug": "mejores-practicas-consultoria-conocimiento-de-la-firma",
+   "titulo": "El conocimiento de la firma no debe irse con quien renuncia",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-calendario-de-obligaciones",
+   "titulo": "Calendario de obligaciones fiscales: ningún vencimiento por sorpresa",
+   "menciona_iurefficient": true,
+   "funciones": "Módulo fiscal, plazos y alertas"
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-conciliacion-de-cfdi",
+   "titulo": "Conciliar CFDI emitidos y recibidos antes de declarar",
+   "menciona_iurefficient": true,
+   "funciones": "Módulo fiscal: CFDI, contribuyentes"
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-buzon-tributario",
+   "titulo": "Buzón tributario: una rutina de revisión para no enterarse tarde",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-expediente-por-contribuyente",
+   "titulo": "Un expediente por contribuyente: ordenado, buscable y completo",
+   "menciona_iurefficient": true,
+   "funciones": "Documentos por carpeta, OCR, búsqueda de texto"
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-documentos-y-firma-con-clientes",
+   "titulo": "Pedir, recibir y firmar documentos con el cliente sin perseguirlo",
+   "menciona_iurefficient": true,
+   "funciones": "Portal externo, firma electrónica"
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-cierre-mensual",
+   "titulo": "El cierre mensual con lista de verificación",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-requerimientos-del-sat",
+   "titulo": "Atender un requerimiento del SAT: plazo, responsable y evidencia",
+   "menciona_iurefficient": true,
+   "funciones": "Tareas con plazo, documentos, asistente que cita fuentes"
+  },
+  {
+   "sector": "fiscal",
+   "slug": "mejores-practicas-fiscal-proteccion-de-datos",
+   "titulo": "Proteger los datos fiscales de tus clientes",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-control-de-plazos",
+   "titulo": "Control de plazos procesales: el término que no se puede perder",
+   "menciona_iurefficient": true,
+   "funciones": "Plazos, alertas, calendario"
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-expediente-digital",
+   "titulo": "El expediente digital ordenado: encontrar la foja en segundos",
+   "menciona_iurefficient": true,
+   "funciones": "Carpetas, OCR, búsqueda en documentos"
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-conflicto-de-intereses",
+   "titulo": "Revisar conflicto de intereses antes de aceptar un asunto",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-investigacion-con-fuentes",
+   "titulo": "Investigación jurídica con fuentes verificables",
+   "menciona_iurefficient": true,
+   "funciones": "Asistente que cita documento y fragmento, fuentes legales"
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-formatos-y-plantillas",
+   "titulo": "Formatos y plantillas del despacho: escribir igual de bien siempre",
+   "menciona_iurefficient": true,
+   "funciones": "Formatos y plantillas, generación de documentos"
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-comunicacion-con-el-cliente",
+   "titulo": "Informar al cliente sin que tenga que preguntar",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-honorarios-y-horas",
+   "titulo": "Honorarios por hora: registrar, autorizar y cobrar lo trabajado",
+   "menciona_iurefficient": true,
+   "funciones": "Hoja de horas, facturación"
+  },
+  {
+   "sector": "derecho",
+   "slug": "mejores-practicas-derecho-secreto-profesional",
+   "titulo": "Secreto profesional en la era de la nube y la IA",
+   "menciona_iurefficient": false,
+   "funciones": ""
+  }
+ ]
+}

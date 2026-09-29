@@ -6,6 +6,7 @@ Subcomandos:
   hero    --version V --out F  Genera la imagen destacada (abstracta, colores de marca).
   publish ARTICULO.json        Sube la imagen y crea el artículo (español e inglés).
   update  SLUG CAMBIOS.json    Cambia campos de un artículo existente (también el slug).
+  practicas                    ¿Toca artículo de mejores prácticas? Y cuál (según mejores_practicas.json).
 
 Credenciales: IUREF_CMS_TOKEN, token de la API de cms_simple (≥ 1.37; renombrar con `update` pide
 ≥ 1.37.1), creado en Usuarios → Acceso por API con acceso a «articulos». Sin token se usa el método
@@ -29,6 +30,7 @@ import time
 import urllib.parse
 import urllib.error
 import urllib.request
+import unicodedata
 import uuid
 from html.parser import HTMLParser
 
@@ -97,6 +99,9 @@ class ApiCms:
 
     def exists(self, slug):
         return self.get_item(slug) is not None
+
+    def date_of(self, slug):
+        return str((self.get_item(slug) or {}).get("date", ""))
 
     def upload(self, path):
         boundary = uuid.uuid4().hex
@@ -217,6 +222,10 @@ class FormCms:
     def exists(self, slug):
         return slug in {s for s, _, _ in self.articles()}
 
+    def date_of(self, slug):
+        _, page = self.get(f"/admin/?p=edit&type={TYPE}&slug={urllib.parse.quote(slug)}")
+        return form_values(page).get("date", "")
+
     def save_article(self, a, slug=None):
         return self.save(article_fields(a), slug=slug)
 
@@ -231,6 +240,17 @@ class FormCms:
         # Campos de los formularios del pack de audio, anidados dentro del editor: no son del artículo.
         for k in ("action", "type", "lang", "back"):
             fields.pop(k, None)
+        changes = dict(changes)
+        if changes.get("category"):
+            # El select del editor espera el slug de una categoría existente, o "__new__" y el nombre aparte.
+            opts = dict(re.findall(r'<option value="([^"]+)"[^>]*>([^<]*)</option>',
+                                   (re.search(r'<select name="category".*?</select>', page, re.S) or re.search("", "")).group(0)))
+            name = changes["category"]
+            hit = next((v for v, lab in opts.items() if v in (name, slugify(name)) or html.unescape(lab).strip().lower() == name.lower()), None)
+            if hit:
+                changes["category"] = hit
+            else:
+                changes["category"], changes["category__new"] = "__new__", name
         fields.update(changes)
         self.csrf = fields["_csrf"]
         url, page = self.post(path, fields)
@@ -327,6 +347,12 @@ def connect():
         print("Aviso: sin IUREF_CMS_TOKEN; uso el login del admin (respaldo).", file=sys.stderr)
     cms.login()
     return cms
+
+
+def slugify(s):
+    s = unicodedata.normalize("NFD", s.lower())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
 def vkey(s):
@@ -507,8 +533,12 @@ def cmd_hero(args):
             fd.arc([W * .72 - r, H * .5 - r, W * .72 + r, H * .5 + r], rnd.randint(0, 360), rnd.randint(0, 360) + 140,
                    fill=(255, 255, 255, 170 - i * 25), width=6)
     fd.rounded_rectangle([96, 300, 96 + 12, 560], 6, fill=PALETTE["a400"] + (255,))
-    fd.text((136, 300), "¿Qué hay de nuevo?", font=_font(46, bold=False), fill=(255, 255, 255, 220))
-    fd.text((130, 360), args.version, font=_font(150), fill=(255, 255, 255, 255))
+    if args.kicker:
+        fd.text((136, 300), args.kicker, font=_font(46, bold=False), fill=(255, 255, 255, 220))
+    size = 150
+    while size > 60 and fd.textlength(args.version, font=_font(size)) > 760:
+        size -= 6
+    fd.text((130, 360 + (150 - size) // 2), args.version, font=_font(size), fill=(255, 255, 255, 255))
     if args.caption:
         fd.text((136, 540), args.caption, font=_font(32, bold=False), fill=PALETTE["a300"] + (235,))
     img = Image.alpha_composite(img, fg).convert("RGB")
@@ -533,8 +563,19 @@ def cmd_publish(args):
         raise SystemExit(f"Ya existe un artículo con slug {a['slug']}; no publico dos veces")
     if a.get("image_file"):
         a["image"] = cms.upload(a["image_file"])
+    inline_images(cms, a)
     slug = cms.save_article({**DEFAULTS, **a})
     print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}", "image": a.get("image", "")}, ensure_ascii=False))
+
+
+def inline_images(cms, a):
+    """Sube `images` ({"IMG1": "ruta/local.png"}) y cambia cada marcador por la URL publicada en el cuerpo ES y EN."""
+    for key, path in (a.pop("images", None) or {}).items():
+        url = "/" + cms.upload(path).lstrip("/")
+        for src in (a, a.get("en") or {}):
+            if key not in src.get("body_html", ""):
+                raise SystemExit(f"El marcador {key} no aparece en body_html ({'en' if src is not a else 'es'})")
+            src["body_html"] = src["body_html"].replace(key, url)
 
 
 def cmd_update(args):
@@ -544,8 +585,46 @@ def cmd_update(args):
     cms = connect()
     if a.get("image_file"):
         a["image"] = cms.upload(a["image_file"])
+    inline_images(cms, a)
     slug = cms.save_article(a, slug=args.slug)
     print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}"}, ensure_ascii=False))
+
+
+PLAN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mejores_practicas.json")
+
+
+def cmd_practicas(args):
+    """¿Toca artículo de mejores prácticas? Rota sectores y toma el primer tema sin publicar del siguiente."""
+    import datetime
+    with open(PLAN, encoding="utf-8") as f:
+        plan = json.load(f)
+    cms = connect()
+    existing = {s for s, _, _ in cms.articles()}
+    done = []
+    for i, t in enumerate(plan["temas"]):
+        if t["slug"] in existing:
+            done.append({**t, "fecha": cms.date_of(t["slug"]), "_i": i})
+    today = datetime.date.today()
+    last = max(done, key=lambda t: (t["fecha"], t["_i"])) if done else None
+    days = (today - datetime.date.fromisoformat(last["fecha"])).days if last and last["fecha"] else None
+    rot = plan["rotacion"]
+    start = (rot.index(last["sector"]) + 1) % len(rot) if last else 0
+    nxt = None
+    for k in range(len(rot)):
+        sector = rot[(start + k) % len(rot)]
+        nxt = next((t for t in plan["temas"] if t["sector"] == sector and t["slug"] not in existing), None)
+        if nxt:
+            nxt = {**nxt, "nombre_sector": plan["sectores"][sector]["nombre"], "cabecera": plan["sectores"][sector]["cabecera"],
+                   "categoria": plan["categoria"]}
+            break
+    due = nxt is not None and (days is None or days >= plan["cada_dias"])
+    print(json.dumps({
+        "toca": due,
+        "dias_desde_el_ultimo": days,
+        "ultimo": {k: last[k] for k in ("slug", "sector", "fecha")} if last else None,
+        "publicados": len(done), "pendientes": len(plan["temas"]) - len(done),
+        "siguiente": nxt,
+    }, ensure_ascii=False, indent=2))
 
 
 def main():
@@ -554,7 +633,8 @@ def main():
     s = sub.add_parser("status")
     s.add_argument("--repo", required=True, help="clon de ellaguno/expert-collaborator")
     h = sub.add_parser("hero")
-    h.add_argument("--version", required=True, help="texto grande, p. ej. v4.85")
+    h.add_argument("--version", required=True, help="texto grande, p. ej. v4.85 o PMO")
+    h.add_argument("--kicker", default="¿Qué hay de nuevo?", help="rótulo sobre el texto grande (vacío = sin rótulo)")
     h.add_argument("--caption", default="", help="frase corta bajo la versión")
     h.add_argument("--motif", choices=MOTIFS, default="abstracto")
     h.add_argument("--out", required=True)
@@ -563,8 +643,9 @@ def main():
     u = sub.add_parser("update")
     u.add_argument("slug", help="slug actual del artículo")
     u.add_argument("article", help="JSON con sólo los campos a cambiar (mismo formato que publish)")
+    sub.add_parser("practicas", help="¿toca artículo de mejores prácticas y cuál?")
     args = ap.parse_args()
-    {"status": cmd_status, "hero": cmd_hero, "publish": cmd_publish, "update": cmd_update}[args.cmd](args)
+    {"status": cmd_status, "hero": cmd_hero, "publish": cmd_publish, "update": cmd_update, "practicas": cmd_practicas}[args.cmd](args)
 
 
 if __name__ == "__main__":
