@@ -41,6 +41,10 @@ una vez al día, sólo aparecen versiones nuevas.
      subtemas, `<hr>` entre versiones. HTML limpio, sin estilos en línea. Omitir detalles
      internos (nombres de servidores, clientes, rutas de código, secretos).
    - `date`: fecha de hoy (AAAA-MM-DD). `image_file`: la imagen del paso 4.
+   - `en`: **versión en inglés, obligatoria** (`publish` se niega sin ella). Objeto con
+     `title` (`What’s new? vX.Y — …`), `excerpt`, `seo_desc`, `tags` (con `release` en vez de
+     `version`) y `body_html`. Traducción fiel y natural del español, misma estructura HTML.
+     El slug es el mismo en ambos idiomas; la versión inglesa queda en `/en/articulos/<slug>`.
 
 4. **Imagen destacada** (1600×860, colores de la marca):
 
@@ -53,8 +57,13 @@ una vez al día, sólo aparecen versiones nuevas.
    `carpeta`, o `abstracto` si ninguno es alusivo. Revisar la imagen antes de publicar.
 
 5. **Publicar**: `python3 iurecms.py publish articulo.json`. Se niega a duplicar un slug.
-   Comprobar después que la URL devuelta carga (HTTP 200) y que el artículo sale en
-   https://iurefficient.com/articulos/.
+   Comprobar después que cargan (HTTP 200) la URL devuelta y `/en/articulos/<slug>`, y que
+   el artículo sale en https://iurefficient.com/articulos/. Para comprobar usar `curl` con su
+   User-Agent por omisión: el servidor responde 406 a algunos User-Agent de navegador.
+
+6. **Corregir un artículo ya publicado**: `python3 iurecms.py update <slug-actual> cambios.json`,
+   con sólo las claves a cambiar (mismo formato que `publish`, incluido `en`). Si trae `slug`,
+   el CMS renombra el artículo.
 
 ## Notas
 

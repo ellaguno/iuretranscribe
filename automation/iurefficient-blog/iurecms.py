@@ -4,7 +4,8 @@
 Subcomandos:
   status  --repo RUTA          Qué versiones ya tienen artículo y cuál sigue.
   hero    --version V --out F  Genera la imagen destacada (abstracta, colores de marca).
-  publish ARTICULO.json        Sube la imagen y crea el artículo.
+  publish ARTICULO.json        Sube la imagen y crea el artículo (español e inglés).
+  update  SLUG CAMBIOS.json    Cambia campos de un artículo existente (también el slug).
 
 Credenciales: variables IUREF_CMS_USER / IUREF_CMS_PASS.
 Requiere Pillow sólo para `hero`.
@@ -26,6 +27,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 import uuid
+from html.parser import HTMLParser
 
 BASE = os.environ.get("IUREF_CMS_BASE", "https://iurefficient.com")
 TYPE = "articulos"
@@ -112,34 +114,90 @@ class Cms:
             raise SystemExit(f"La subida de imagen falló: {resp[:300]}")
         return j["path"]
 
-    def create(self, a):
-        _, page = self.get(f"/admin/?p=edit&type={TYPE}")
-        self._csrf_from(page)
-        fields = {
-            "_csrf": self.csrf,
-            "title[es]": a["title"], "title[en]": "",
-            "excerpt[es]": a["excerpt"], "excerpt[en]": "",
-            "body[es]": a["body_html"], "body[en]": "",
-            "seo_title[es]": a.get("seo_title", ""), "seo_title[en]": "",
-            "seo_desc[es]": a.get("seo_desc", ""), "seo_desc[en]": "",
-            "status": a.get("status", "published"),
-            "publish_at": "", "unpublish_at": "",
-            "slug": a["slug"],
-            "date": a["date"],
-            "author": a.get("author", "Iurefficient"),
-            "category": a.get("category", "novedades-de-version"), "category__new": "",
-            "tags[es]": a.get("tags", "version"), "tags[en]": "",
-            "image": a.get("image", ""),
-            "brand": a.get("brand", "derecho"),
-            "autolink_off": "0",
-            "audio[es]": "", "audio[en]": "",
-        }
-        url, page = self.post(f"/admin/?p=edit&type={TYPE}", fields)
+    def save(self, changes, slug=None):
+        """Guarda un artículo: parte de los valores actuales del formulario (vacíos si es nuevo)
+        y aplica `changes`. Con `slug` edita ese artículo; si changes["slug"] difiere, el CMS lo renombra."""
+        path = f"/admin/?p=edit&type={TYPE}" + (f"&slug={urllib.parse.quote(slug)}" if slug else "")
+        _, page = self.get(path)
+        fields = form_values(page)
+        if slug and fields.get("slug") != slug:
+            raise SystemExit(f"No encontré el artículo {slug}")
+        # Campos de los formularios del pack de audio, anidados dentro del editor: no son del artículo.
+        for k in ("action", "type", "lang", "back"):
+            fields.pop(k, None)
+        fields.update(changes)
+        self.csrf = fields["_csrf"]
+        url, page = self.post(path, fields)
         m = re.search(r"slug=([^&#]+)", url)
         if not m:
             err = re.findall(r'class="ad-(?:error|alert)[^"]*"[^>]*>(.*?)<', page, re.S)
             raise SystemExit(f"El CMS no guardó el artículo: {err or url}")
         return urllib.parse.unquote(m.group(1))
+
+
+class _FormParser(HTMLParser):
+    """Valores del formulario principal del editor, como los enviaría el navegador."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.depth, self.values, self._ta, self._sel, self._sel_first = 0, {}, None, None, None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form" and "data-slug-source" in a:
+            self.depth = 1
+            return
+        if not self.depth:
+            return
+        name = a.get("name")
+        if tag == "input" and name and a.get("type") not in ("submit", "button", "file"):
+            if a.get("type") in ("checkbox", "radio") and "checked" not in a:
+                return
+            self.values[name] = a.get("value", "")
+        elif tag == "textarea" and name:
+            self._ta, self.values[name] = name, ""
+        elif tag == "select" and name:
+            self._sel, self._sel_first = name, None
+        elif tag == "option" and self._sel:
+            if self._sel_first is None:
+                self._sel_first = a.get("value", "")
+            if "selected" in a:
+                self.values[self._sel] = a.get("value", "")
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self.depth:
+            self.depth = 0
+        elif tag == "textarea":
+            self._ta = None
+        elif tag == "select" and self._sel:
+            self.values.setdefault(self._sel, self._sel_first or "")
+            self._sel = None
+
+    def handle_data(self, data):
+        if self._ta:
+            self.values[self._ta] += data
+
+
+def form_values(page):
+    p = _FormParser()
+    p.feed(page)
+    if "_csrf" not in p.values:
+        raise SystemExit("No encontré el formulario del editor")
+    return p.values
+
+
+def article_fields(a):
+    """Campos del CMS a partir del JSON del artículo (claves ausentes = no se tocan)."""
+    f = {}
+    for lang, src in (("es", a), ("en", a.get("en") or {})):
+        for key, field in (("title", "title"), ("excerpt", "excerpt"), ("body_html", "body"),
+                           ("seo_title", "seo_title"), ("seo_desc", "seo_desc"), ("tags", "tags")):
+            if key in src:
+                f[f"{field}[{lang}]"] = src[key]
+    for key in ("slug", "date", "status", "author", "category", "image", "brand"):
+        if key in a:
+            f[key] = a[key]
+    return f
 
 
 def vkey(s):
@@ -330,20 +388,38 @@ def cmd_hero(args):
     print(args.out)
 
 
+DEFAULTS = {"status": "published", "author": "Iurefficient", "category": "novedades-de-version", "brand": "derecho"}
+
+
 def cmd_publish(args):
     with open(args.article, encoding="utf-8") as f:
         a = json.load(f)
     for k in ("title", "slug", "date", "excerpt", "body_html"):
         if not a.get(k):
             raise SystemExit(f"Falta el campo «{k}» en {args.article}")
+    for k in ("title", "excerpt", "body_html"):
+        if not (a.get("en") or {}).get(k):
+            raise SystemExit(f"Falta en.{k} (versión en inglés) en {args.article}")
     cms = Cms()
     cms.login()
     if a["slug"] in {s for s, _, _ in cms.articles()}:
         raise SystemExit(f"Ya existe un artículo con slug {a['slug']}; no publico dos veces")
     if a.get("image_file"):
         a["image"] = cms.upload(a["image_file"])
-    slug = cms.create(a)
+    slug = cms.save(article_fields({**DEFAULTS, **a}))
     print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}", "image": a.get("image", "")}, ensure_ascii=False))
+
+
+def cmd_update(args):
+    """Modifica un artículo existente: sólo cambian las claves presentes en el JSON (slug incluido)."""
+    with open(args.article, encoding="utf-8") as f:
+        a = json.load(f)
+    cms = Cms()
+    cms.login()
+    if a.get("image_file"):
+        a["image"] = cms.upload(a["image_file"])
+    slug = cms.save(article_fields(a), slug=args.slug)
+    print(json.dumps({"slug": slug, "url": f"{BASE}/articulos/{slug}"}, ensure_ascii=False))
 
 
 def main():
@@ -357,9 +433,12 @@ def main():
     h.add_argument("--motif", choices=MOTIFS, default="abstracto")
     h.add_argument("--out", required=True)
     p = sub.add_parser("publish")
-    p.add_argument("article", help="JSON con title, slug, date, excerpt, body_html, tags, image_file")
+    p.add_argument("article", help="JSON con title, slug, date, excerpt, body_html, tags, image_file y en{title, excerpt, body_html, seo_desc, tags}")
+    u = sub.add_parser("update")
+    u.add_argument("slug", help="slug actual del artículo")
+    u.add_argument("article", help="JSON con sólo los campos a cambiar (mismo formato que publish)")
     args = ap.parse_args()
-    {"status": cmd_status, "hero": cmd_hero, "publish": cmd_publish}[args.cmd](args)
+    {"status": cmd_status, "hero": cmd_hero, "publish": cmd_publish, "update": cmd_update}[args.cmd](args)
 
 
 if __name__ == "__main__":
