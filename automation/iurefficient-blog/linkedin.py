@@ -145,7 +145,9 @@ def cmd_post(args):
     img = p.get("image_file")
     if not img and p.get("image_url"):
         img = "/tmp/linkedin-thumb" + os.path.splitext(p["image_url"])[1]
-        urllib.request.urlretrieve(p["image_url"], img)
+        req = urllib.request.Request(p["image_url"], headers={"User-Agent": "iurecms/1.1 (+publicador de novedades)"})
+        with urllib.request.urlopen(req) as r, open(img, "wb") as f:
+            f.write(r.read())
     if img:
         body["content"]["article"]["thumbnail"] = upload_image(author, img)
     code, hdrs, j = rest("POST", "/rest/posts", body)
