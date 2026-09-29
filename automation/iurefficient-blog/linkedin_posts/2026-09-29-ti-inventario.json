@@ -1,0 +1,7 @@
+{
+ "text": "Recuerdo cuando el «inventario» de muchas áreas de TI era una hoja de cálculo que alguien actualizaba… cuando se acordaba.\n\nPersonalmente creo que el problema nunca fue la herramienta sino la costumbre: el inventario se arma una vez y a los tres meses ya no se parece a la realidad. Y lo que no está registrado no se actualiza, no se respalda y no se cobra cuando lo usa un cliente.\n\nEscribí ocho prácticas; si tuviera que quedarme con cinco:\n\n• Un código propio pegado al equipo. El número de serie del fabricante casi nunca está a la vista.\n• Cada activo con responsable y ubicación. «Está en la oficina» no es una ubicación.\n• Cada equipo y licencia ligado al proyecto que lo usa. Así «¿esto quién lo paga?» tiene respuesta.\n• Borrar los datos antes de dar de baja un equipo, con un método que se pueda verificar.\n• Conciliar cada trimestre contra lo que de verdad existe.\n\nNada de esto es «sofisticado»; la diferencia está en hacerlo siempre.\n\n¿Cómo lo llevan en su equipo? Y si les interesa, el siguiente lo dedico a las licencias, que son las que más se escapan.\n\n#GestiónDeTI #InventarioDeActivos",
+ "url": "https://iurefficient.com/articulos/mejores-practicas-ti-inventario-de-activos",
+ "title": "Inventario de activos de TI: lo que no está registrado no se puede proteger",
+ "description": "Ocho prácticas para un inventario de TI que se mantiene al día.",
+ "image_url": "https://iurefficient.com/uploads/2026/09/hero-ti-inventario.png"
+}

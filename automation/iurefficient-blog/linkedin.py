@@ -7,6 +7,7 @@ Subcomandos:
 
 POST.json: {"text": "...", "url": "https://iurefficient.com/articulos/...",
             "title": "...", "description": "...", "image_file": "hero.png"}
+(en lugar de image_file puede ir image_url: la imagen destacada ya publicada en el blog)
 
 Token: variable LINKEDIN_ACCESS_TOKEN (permisos openid, profile, w_member_social; dura 60 días).
 Versión de la API: LINKEDIN_VERSION (AAAAMM); por omisión el mes anterior, y si LinkedIn la rechaza
@@ -141,8 +142,12 @@ def cmd_post(args):
     if args.dry_run:
         print(json.dumps(body, ensure_ascii=False, indent=2))
         return
-    if p.get("image_file"):
-        body["content"]["article"]["thumbnail"] = upload_image(author, p["image_file"])
+    img = p.get("image_file")
+    if not img and p.get("image_url"):
+        img = "/tmp/linkedin-thumb" + os.path.splitext(p["image_url"])[1]
+        urllib.request.urlretrieve(p["image_url"], img)
+    if img:
+        body["content"]["article"]["thumbnail"] = upload_image(author, img)
     code, hdrs, j = rest("POST", "/rest/posts", body)
     if code != 201:
         raise SystemExit(f"LinkedIn no publicó ({code}): {j}")
