@@ -20,6 +20,13 @@ sesolibre.com (reseña del curso «Introduction to Linux», 2014; el poema «Amo
 - **Frases cortas, vocabulario llano**, español de México. Le gusta el software libre, aprender y
   explicar; cuando algo lo emociona se nota sin adjetivos inflados.
 
+## Nunca inventar
+
+No inventar anécdotas, clientes, conversaciones, cifras ni experiencias de Eduardo. El ángulo
+personal sale de sus opiniones («creo que…», «lo que más veo que falla es…» sólo si es una
+observación general defendible) o de anécdotas que él haya dado y estén anotadas al final de este
+archivo. Si no hay anécdota real, se escribe como opinión, no como recuerdo.
+
 ## Qué evitar (suena a IA o a folleto)
 
 - Arranques genéricos: «En el mundo actual…», «En la era digital…», «Hoy más que nunca…».
@@ -40,3 +47,7 @@ sesolibre.com (reseña del curso «Introduction to Linux», 2014; el poema «Amo
 - El enlace al artículo va en la tarjeta del post (título, descripción e imagen del artículo).
 - 2–3 hashtags al final, específicos del tema (#PMO, #MesaDeServicio), nunca genéricos (#IA,
   #Innovación, #Éxito).
+
+## Anécdotas reales de Eduardo (para usar como ángulo personal)
+
+_(Vacío por ahora: se añaden sólo las que Eduardo cuente.)_
