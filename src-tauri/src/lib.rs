@@ -1,6 +1,7 @@
 mod audio;
 mod gpu;
 mod llm;
+mod mcp;
 mod models;
 mod recorder;
 mod settings;
@@ -8,7 +9,7 @@ mod subtitles;
 mod transcribe;
 mod vocab;
 
-use iurefficient_connect::{api, lang, rest::{Login, Session, SessionExport}, secrets, tr, webdav::{self, WebDav}, Account};
+use iurefficient_connect::{agents, api, lang, rest::{Login, Session, SessionExport}, secrets, tr, webdav::{self, WebDav}, Account};
 use models::{Downloads, ModelInfo};
 use recorder::Recorder;
 use serde::{Deserialize, Serialize};
@@ -1221,6 +1222,148 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| tr!("Could not read {path}: {e}", "No se pudo leer {path}: {e}"))
 }
 
+// ---------------------------------------------------------------------------
+// Asistentes de IA: servidor MCP local (Claude Desktop, VS Code) y el de la
+// instancia (Microsoft 365 Copilot)
+// ---------------------------------------------------------------------------
+
+/// Clave con la que IureTranscribe aparece en la configuración de los asistentes.
+const MCP_KEY: &str = "iuretranscribe";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentsStatus {
+    claude_desktop: agents::Status,
+    vscode: agents::Status,
+}
+
+#[tauri::command]
+fn agents_status() -> AgentsStatus {
+    AgentsStatus { claude_desktop: agents::claude_desktop_status(MCP_KEY), vscode: agents::vscode_status(MCP_KEY) }
+}
+
+#[tauri::command]
+fn claude_desktop_connect() -> Result<agents::Status, String> {
+    agents::claude_desktop_connect(MCP_KEY).map_err(|e| format!("{e:#}"))?;
+    Ok(agents::claude_desktop_status(MCP_KEY))
+}
+
+#[tauri::command]
+fn claude_desktop_disconnect() -> Result<agents::Status, String> {
+    agents::claude_desktop_disconnect(MCP_KEY).map_err(|e| format!("{e:#}"))?;
+    Ok(agents::claude_desktop_status(MCP_KEY))
+}
+
+/// Abre el enlace `vscode:mcp/install?…`; VS Code pide confirmación y lo guarda.
+#[tauri::command]
+fn vscode_connect() -> Result<(), String> {
+    let url = agents::vscode_install_url(MCP_KEY).map_err(|e| format!("{e:#}"))?;
+    log::info!("VS Code: abriendo el enlace de instalación MCP");
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| tr!("Could not open VS Code: {e}", "No se pudo abrir VS Code: {e}"))
+}
+
+/// Los tokens de agente que creó esta función se reconocen por el nombre.
+const COPILOT_TOKEN_NAME: &str = "Microsoft 365 Copilot";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CopilotStatus {
+    signed_in: bool,
+    endpoint_url: Option<String>,
+    /// Página de la instancia donde se administran los tokens de agente.
+    manage_url: Option<String>,
+    tokens: Vec<api::McpTokenInfo>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CopilotToken {
+    endpoint_url: String,
+    token: String,
+    info: api::McpTokenInfo,
+}
+
+fn manage_url(sess: &Session) -> Option<String> {
+    sess.account().api("/dashboard/settings/agents").ok().map(|u| u.to_string())
+}
+
+#[tauri::command]
+async fn copilot_status(state: State<'_, AppState>) -> Result<CopilotStatus, String> {
+    let off = |error: Option<String>| CopilotStatus { signed_in: false, endpoint_url: None, manage_url: None, tokens: vec![], error };
+    let Ok(sess) = iure_session(&state).await else { return Ok(off(None)) };
+    match api::list_mcp_tokens(&sess).await {
+        Ok(t) => Ok(CopilotStatus {
+            signed_in: true,
+            endpoint_url: Some(t.endpoint_url),
+            manage_url: manage_url(&sess),
+            tokens: t.tokens.into_iter().filter(|t| t.is_valid && t.name.starts_with(COPILOT_TOKEN_NAME)).collect(),
+            error: None,
+        }),
+        Err(e) => Ok(CopilotStatus { signed_in: true, manage_url: manage_url(&sess), ..off(Some(format!("{e:#}"))) }),
+    }
+}
+
+/// Crea un token de agente para Microsoft 365 Copilot (un año de vigencia). El secreto
+/// sólo se muestra ahora: no se guarda en el equipo, porque lo usa Copilot, no la app.
+#[tauri::command]
+async fn copilot_create_token(state: State<'_, AppState>) -> Result<CopilotToken, String> {
+    let sess = iure_session(&state).await?;
+    let list = api::list_mcp_tokens(&sess).await.map_err(|e| format!("{e:#}"))?;
+    let name = tr!("{COPILOT_TOKEN_NAME} (created from IureTranscribe)", "{COPILOT_TOKEN_NAME} (creado desde IureTranscribe)");
+    let created = api::create_mcp_token(&sess, &name, Some(365)).await.map_err(|e| format!("{e:#}"))?;
+    log::info!("token de agente para Microsoft 365 Copilot creado");
+    Ok(CopilotToken { endpoint_url: list.endpoint_url, token: created.secret, info: created.info })
+}
+
+#[tauri::command]
+async fn copilot_revoke_token(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let sess = iure_session(&state).await?;
+    api::revoke_mcp_token(&sess, &id).await.map_err(|e| format!("{e:#}"))
+}
+
+/// La misma carpeta de recursos que usa Tauri, calculada sin arrancar Tauri.
+fn standalone_resource_dir() -> Option<PathBuf> {
+    let info = tauri::PackageInfo {
+        name: "IureTranscribe".into(),
+        version: env!("CARGO_PKG_VERSION").parse().ok()?,
+        authors: env!("CARGO_PKG_AUTHORS"),
+        description: env!("CARGO_PKG_DESCRIPTION"),
+        crate_name: env!("CARGO_PKG_NAME"),
+    };
+    tauri::utils::platform::resource_dir(&info, &tauri::Env::default()).ok()
+}
+
+/// `IureTranscribe --mcp`: servidor MCP por stdio, sin ventana. Devuelve el código de salida.
+pub fn run_mcp() -> i32 {
+    init_logging("iuretranscribe-mcp");
+    whisper_rs::install_logging_hooks();
+    // Las mismas carpetas que `app_config_dir` / `app_data_dir` de Tauri.
+    const ID: &str = "com.iurefficient.iuretranscribe";
+    let settings_path = dirs::config_dir().map(|d| d.join(ID).join("settings.json")).unwrap_or_default();
+    let data_dir = dirs::data_dir().map(|d| d.join(ID)).unwrap_or_default();
+    let settings = Settings::load(&settings_path);
+    lang::set(lang::resolve(&settings.ui_language));
+    let bundled_models_dir = standalone_resource_dir().map(|r| r.join("models")).filter(|d| d.is_dir());
+    log::info!("modo MCP; modelos en {}", data_dir.join("models").display());
+    mcp::serve(
+        settings,
+        mcp::Paths {
+            settings_path,
+            models_dir: data_dir.join("models"),
+            bundled_models_dir,
+            recordings_default: dirs::audio_dir().unwrap_or_else(|| data_dir.clone()).join("IureTranscribe"),
+        },
+    )
+}
+
+/// Configuración para registrar este ejecutable como servidor MCP en un cliente
+/// (Claude Desktop, Claude Code, VS Code): `{"command": …, "args": ["--mcp"]}`.
+pub fn mcp_client_config() -> serde_json::Value {
+    let entry = agents::server_entry().unwrap_or_else(|_| serde_json::json!({"command": "IureTranscribe", "args": ["--mcp"]}));
+    serde_json::json!({ "mcpServers": { MCP_KEY: entry } })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Ruta del registro de esta ejecución (None si no se pudo crear).
 static LOG_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
@@ -1243,14 +1386,16 @@ impl std::io::Write for LogTee {
 /// Registro en archivo además de stderr. En Windows y en los lanzadores de escritorio
 /// nadie ve stderr, y sin esto un cierre inesperado no dejaba rastro. Se reinicia en
 /// cada arranque; el anterior queda como `iuretranscribe.prev.log`.
-fn init_logging() {
+/// `file` es el nombre del registro: la ventana y el servidor MCP pueden correr a la vez
+/// y cada uno rota el suyo.
+fn init_logging(file: &str) {
     let env = env_logger::Env::default().default_filter_or("info,whisper_rs=warn");
     let mut builder = env_logger::Builder::from_env(env);
     let path = dirs::data_dir().map(|d| d.join("com.iurefficient.iuretranscribe").join("logs"));
     let file = path.and_then(|dir| {
         std::fs::create_dir_all(&dir).ok()?;
-        let log = dir.join("iuretranscribe.log");
-        let _ = std::fs::rename(&log, dir.join("iuretranscribe.prev.log"));
+        let log = dir.join(format!("{file}.log"));
+        let _ = std::fs::rename(&log, dir.join(format!("{file}.prev.log")));
         std::fs::File::create(&log).ok().map(|f| (log, f))
     });
     match file {
@@ -1282,7 +1427,7 @@ pub fn run() {
     if std::env::args().nth(1).as_deref() == Some("--gpu-probe") {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,whisper_rs=warn")).init();
     } else {
-        init_logging();
+        init_logging("iuretranscribe");
     }
     whisper_rs::install_logging_hooks();
     // Proceso hijo de la sonda de GPU: no arranca la interfaz.
@@ -1368,6 +1513,13 @@ pub fn run() {
             ui_language,
             default_prompts,
             check_update_notice,
+            agents_status,
+            claude_desktop_connect,
+            claude_desktop_disconnect,
+            vscode_connect,
+            copilot_status,
+            copilot_create_token,
+            copilot_revoke_token,
             get_settings,
             save_settings,
             list_models,

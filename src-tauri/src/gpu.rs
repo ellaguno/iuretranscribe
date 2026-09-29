@@ -138,6 +138,26 @@ fn notice_for(result: &str) -> Option<GpuNotice> {
 /// (una vez por versión), avisa a la interfaz si el resultado no es «gpu» y devuelve
 /// `Err` con el mensaje si la variante no sirve en esta máquina.
 pub fn effective_use_gpu(app: &AppHandle, settings: &Mutex<Settings>, settings_path: &Path, model_path: &Path, wanted: bool) -> Result<bool, String> {
+    decide_use_gpu(settings, settings_path, model_path, wanted, || {
+        let _ = app.emit("gpu-probe", "start");
+    }, |n| {
+        let _ = app.emit("gpu-notice", n);
+    })
+}
+
+/// Lo mismo sin interfaz (modo `--mcp`): los avisos sólo van al registro.
+pub fn effective_use_gpu_headless(settings: &Mutex<Settings>, settings_path: &Path, model_path: &Path, wanted: bool) -> Result<bool, String> {
+    decide_use_gpu(settings, settings_path, model_path, wanted, || log::info!("sonda de GPU: inicio"), |n| log::warn!("{}", n.message))
+}
+
+fn decide_use_gpu(
+    settings: &Mutex<Settings>,
+    settings_path: &Path,
+    model_path: &Path,
+    wanted: bool,
+    on_probe: impl Fn(),
+    on_notice: impl Fn(&GpuNotice),
+) -> Result<bool, String> {
     if !transcribe::is_gpu_variant() {
         return Ok(wanted);
     }
@@ -153,7 +173,7 @@ pub fn effective_use_gpu(app: &AppHandle, settings: &Mutex<Settings>, settings_p
     let result = match cached {
         Some(r) => r,
         None => {
-            let _ = app.emit("gpu-probe", "start");
+            on_probe();
             let r = if run_child(model_path, true) {
                 "gpu"
             } else if run_child(model_path, false) {
@@ -171,7 +191,7 @@ pub fn effective_use_gpu(app: &AppHandle, settings: &Mutex<Settings>, settings_p
         }
     };
     if let Some(n) = notice_for(&result) {
-        let _ = app.emit("gpu-notice", &n);
+        on_notice(&n);
         if result == "none" {
             return Err(n.message);
         }

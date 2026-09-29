@@ -332,6 +332,51 @@ export interface RecordingResult {
   durationSecs: number;
 }
 
+/** Estado de IureTranscribe en un asistente con servidor MCP local. */
+export interface AgentStatus {
+  /** El asistente está en este equipo. */
+  installed: boolean;
+  /** IureTranscribe está registrado y apunta a este ejecutable. */
+  connected: boolean;
+  /** Está registrado pero con otra ruta (la app se movió o se reinstaló). */
+  stale: boolean;
+  configPath: string | null;
+  downloadUrl: string;
+  /** Sólo VS Code: tiene la extensión de GitHub Copilot. */
+  copilot?: boolean;
+}
+
+export interface AgentsStatus {
+  claudeDesktop: AgentStatus;
+  vscode: AgentStatus;
+}
+
+export interface McpTokenInfo {
+  id: string;
+  name: string;
+  tokenPrefix: string | null;
+  isValid: boolean;
+  createdAt: string | null;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  callCount: number;
+}
+
+/** Microsoft 365 Copilot: usa el servidor MCP de la instancia, no el de este equipo. */
+export interface CopilotStatus {
+  signedIn: boolean;
+  endpointUrl: string | null;
+  manageUrl: string | null;
+  tokens: McpTokenInfo[];
+  error: string | null;
+}
+
+export interface CopilotToken {
+  endpointUrl: string;
+  token: string;
+  info: McpTokenInfo;
+}
+
 export interface UpdateNotice {
   version: string;
   url: string;
@@ -346,6 +391,13 @@ export interface GpuNotice {
 
 export const api = {
   checkUpdateNotice: () => invoke<UpdateNotice | null>("check_update_notice"),
+  agentsStatus: () => invoke<AgentsStatus>("agents_status"),
+  claudeDesktopConnect: () => invoke<AgentStatus>("claude_desktop_connect"),
+  claudeDesktopDisconnect: () => invoke<AgentStatus>("claude_desktop_disconnect"),
+  vscodeConnect: () => invoke<void>("vscode_connect"),
+  copilotStatus: () => invoke<CopilotStatus>("copilot_status"),
+  copilotCreateToken: () => invoke<CopilotToken>("copilot_create_token"),
+  copilotRevokeToken: (id: string) => invoke<void>("copilot_revoke_token", { id }),
   iureTestConnection: () => invoke<IureConnectionInfo>("iure_test_connection"),
   iureList: (folder: string) => invoke<IureListing>("iure_list", { folder }),
   iureUpload: (jobId: string, folder: string, files: string[]) =>

@@ -60,6 +60,42 @@ El conector es el crate común [`iurefficient-connect`](https://github.com/ellag
 compartido con IureEditor, IureDav e IureOCR; las credenciales viven en el llavero del sistema
 (la misma entrada de contraseña WebDAV que usa IureDav), no en el archivo de ajustes.
 
+## Uso desde Claude, Copilot y otros agentes (MCP)
+
+`IureTranscribe --mcp` arranca un servidor [MCP](https://modelcontextprotocol.io) por
+stdio, sin ventana. Claude Desktop, Claude Code, Copilot en VS Code o cualquier cliente
+MCP puede transcribir con el Whisper de este equipo, y el modelo del propio cliente
+redacta el resumen o la minuta: **no hace falta llave de OpenRouter**. El audio nunca sale
+del equipo; sólo el texto que el agente decide leer.
+
+| Herramienta | Qué hace |
+| --- | --- |
+| `transcribe_file` | Transcribe un audio o video, escribe los archivos (SRT/TXT… según Ajustes) junto al audio y devuelve el texto; con `timestamps`, cada línea con su hora |
+| `transcription_status` | Si la transcripción es larga, `transcribe_file` devuelve un `jobId` a los ~50 s y el trabajo sigue: esta herramienta espera y devuelve el texto; también lee el resto con `offset` |
+| `read_transcript` | Lee una transcripción o una minuta ya existente, por partes |
+| `audio_info` | Duración, tamaño y transcripciones que ya existen de un archivo |
+| `list_recordings` | Las últimas grabaciones hechas con la app, con su duración y si ya están transcritas |
+| `transcription_setup` | Modelo, idioma, formatos y modelos descargados |
+
+Usa el modelo, el idioma, el vocabulario propio y las correcciones de Ajustes. El modelo
+tiene que estar descargado (sección Modelos). El registro va a `iuretranscribe-mcp.log`.
+
+En **Ajustes → Asistentes de IA** la app detecta qué asistentes hay y conecta cada uno:
+
+- **Microsoft 365 Copilot** no puede usar programas del equipo, pero sí el servidor MCP de
+  la instancia. Con la sesión iniciada, **Crear acceso para Copilot** genera un token
+  `iurmcp_…` (un año) y muestra la URL y los pasos para Copilot Studio (encabezado
+  `X-MCP-Token`). Para que Copilot lea una reunión, hay que guardar en Iurefficient su
+  transcripción o su minuta. Los tokens se revocan desde la misma fila.
+- **GitHub Copilot en VS Code**: **Conectar** abre el enlace `vscode:mcp/install?…`; VS
+  Code pide confirmación y guarda el servidor.
+- **Claude Desktop**: **Conectar** agrega la entrada a `claude_desktop_config.json` sin
+  tocar el resto (deja una copia `.bak-iuretranscribe`). Después hay que cerrar y abrir
+  Claude Desktop.
+
+Para otros clientes: `claude mcp add iuretranscribe -- /ruta/a/IureTranscribe --mcp` en
+Claude Code, o la salida de `IureTranscribe --mcp-config` en su configuración.
+
 ## Grabación
 
 | Plataforma | Micrófono | Audio del sistema (bocina) |
