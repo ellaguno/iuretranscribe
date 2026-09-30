@@ -242,4 +242,4 @@ operating system keychain, never in configuration files.
 
 ## Licencia
 
-MIT.
+Apache License 2.0 — ver [LICENSE](LICENSE).
