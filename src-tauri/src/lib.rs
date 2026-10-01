@@ -1104,7 +1104,7 @@ async fn iure_upload_to_crm(app: AppHandle, state: State<'_, AppState>, request:
 }
 
 // ---------------------------------------------------------------------------
-// Apps de Iurefficient (IureEditor, IureDav): detección, lanzamiento y enlaces.
+// Apps de Iurefficient (iureditor, IureDav): detección, lanzamiento y enlaces.
 // ---------------------------------------------------------------------------
 
 /// Estado de las apps de escritorio de Iurefficient (instalada, ruta, última versión en GitHub).
@@ -1117,7 +1117,7 @@ async fn apps_status(with_network: bool) -> Vec<iurefficient_connect::apps::AppS
     }
 }
 
-/// Abre un archivo con otra app de Iurefficient (p. ej. la minuta con IureEditor).
+/// Abre un archivo con otra app de Iurefficient (p. ej. la minuta con iureditor).
 #[tauri::command]
 fn open_with_app(app: String, path: String) -> Result<(), String> {
     let id = iurefficient_connect::apps::AppId::parse(&app).ok_or_else(|| tr!("unknown app: {app}", "app desconocida: {app}"))?;
@@ -1475,7 +1475,7 @@ pub fn run() {
             let mut settings = Settings::load(&settings_path);
             // Idioma de la interfaz antes de cualquier mensaje (también los del conector).
             lang::set(lang::resolve(&settings.ui_language));
-            // Sin cuenta configurada: si otra app de Iurefficient (IureDav, IureEditor, IureOCR)
+            // Sin cuenta configurada: si otra app de Iurefficient (IureDav, iureditor, IureOCR)
             // ya inició sesión en este equipo, se toma su instancia y correo; la sesión
             // y la contraseña WebDAV están en el llavero compartido.
             if settings.iure_domain.trim().is_empty() || settings.iure_email.trim().is_empty() {

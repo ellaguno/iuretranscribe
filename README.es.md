@@ -168,7 +168,7 @@ destinos más:
   con la duración y el resumen.
 
 El conector es el crate común [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect),
-compartido con IureEditor, IureDav e IureOCR; las credenciales viven en el llavero del sistema
+compartido con iureditor, IureDav e IureOCR; las credenciales viven en el llavero del sistema
 (la misma entrada de contraseña WebDAV que usa IureDav), no en el archivo de ajustes.
 
 ## Uso desde Claude, Copilot y otros agentes (MCP)
@@ -223,7 +223,7 @@ si así se indica, se agregan a la cola y se transcriben solas.
 | App | Qué hace |
 | --- | --- |
 | **IureTranscribe** | Transcripción local con Whisper, grabación en vivo con quién habló, resumen y minuta. |
-| [IureEditor](https://github.com/ellaguno/iureditor) | Editor Markdown WYSIWYG con Mermaid, LaTeX y exportación a PDF/DOCX. |
+| [iureditor](https://github.com/ellaguno/iureditor) | Editor Markdown WYSIWYG con Mermaid, LaTeX y exportación a PDF/DOCX. |
 | [IureDav](https://github.com/ellaguno/iuredav) | Monta un servidor WebDAV (o Iurefficient) como unidad. |
 | [IureOCR](https://github.com/ellaguno/iureocr) | OCR local que convierte escaneos en PDF con texto buscable. |
 | [iureTI](https://github.com/ellaguno/iureTI) | Sonda de descubrimiento de activos de TI para el inventario de Iurefficient. |

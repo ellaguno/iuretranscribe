@@ -186,7 +186,7 @@ const segs: any[] = [];
 
 const apps = [
   { id: "transcribe", name: "IureTranscribe", description: "", installed: true, path: "/usr/bin/iuretranscribe", downloadUrl: "https://github.com/ellaguno/iuretranscribe/releases/latest", latestVersion: "0.7.0" },
-  { id: "editor", name: "IureEditor", description: "", installed: true, path: "/usr/bin/iureditor", downloadUrl: "https://github.com/ellaguno/iureditor/releases/latest", latestVersion: null },
+  { id: "editor", name: "iureditor", description: "", installed: true, path: "/usr/bin/iureditor", downloadUrl: "https://github.com/ellaguno/iureditor/releases/latest", latestVersion: null },
   { id: "dav", name: "IureDav", description: "", installed: false, path: null, downloadUrl: "https://github.com/ellaguno/iuredav/releases/latest", latestVersion: null },
   { id: "ocr", name: "IureOCR", description: "", installed: false, path: null, downloadUrl: "https://github.com/ellaguno/iureocr/releases/latest", latestVersion: null },
 ];

@@ -197,7 +197,7 @@ export async function refreshApps(withNetwork: boolean): Promise<void> {
   }
 }
 
-/** Abre un archivo con IureEditor; si no está instalada, ofrece descargarla. */
+/** Abre un archivo con iureditor; si no está instalada, ofrece descargarla. */
 export async function openWithEditor(path: string): Promise<void> {
   const ed = appStatus("editor");
   if (ed && !ed.installed) {

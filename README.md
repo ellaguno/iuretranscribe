@@ -168,7 +168,7 @@ button offers two more destinations:
   duration and the summary.
 
 The connector is the shared [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect)
-crate, shared with IureEditor, IureDav and IureOCR; credentials live in the system keychain
+crate, shared with iureditor, IureDav and IureOCR; credentials live in the system keychain
 (the same WebDAV password entry that IureDav uses), not in the settings file.
 
 ## Use from Claude, Copilot and other agents (MCP)
@@ -224,7 +224,7 @@ configured, are added to the queue and transcribed automatically.
 | App | What it does |
 | --- | --- |
 | **IureTranscribe** | Local Whisper transcription, live recording with who-spoke, summaries and minutes. |
-| [IureEditor](https://github.com/ellaguno/iureditor) | WYSIWYG Markdown editor with Mermaid, LaTeX and PDF/DOCX export. |
+| [iureditor](https://github.com/ellaguno/iureditor) | WYSIWYG Markdown editor with Mermaid, LaTeX and PDF/DOCX export. |
 | [IureDav](https://github.com/ellaguno/iuredav) | Mount a WebDAV server (or Iurefficient) as a drive. |
 | [IureOCR](https://github.com/ellaguno/iureocr) | Local OCR that turns scans into searchable PDFs. |
 | [iureTI](https://github.com/ellaguno/iureTI) | IT asset discovery probe for the Iurefficient inventory. |

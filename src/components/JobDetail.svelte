@@ -213,7 +213,7 @@
     api.openPath(path).catch((e) => toast(String(e), "error"));
   }
   let editor = $derived(appStatus("editor"));
-  /** IureEditor abre Markdown, texto y .docx; no tiene sentido ofrecerla para PDF. */
+  /** iureditor abre Markdown, texto y .docx; no tiene sentido ofrecerla para PDF. */
   function editorCanOpen(path: string) {
     return /\.(md|markdown|txt|docx)$/i.test(path);
   }
@@ -341,7 +341,7 @@
                 {#if c.localPath}
                   <button class="btn sm" onclick={() => openFile(c.localPath!)}><Icon name="file" size={13} /> {t("detail.openExt", { ext: c.localPath.split(".").pop()?.toUpperCase() ?? "" })}</button>
                   {#if editorCanOpen(c.localPath)}
-                    <button class="btn sm ghost" title={editor?.installed ? t("detail.openWithEditor") : t("detail.editorMissing")} onclick={() => openWithEditor(c.localPath!)}><Icon name="edit" size={13} /> IureEditor</button>
+                    <button class="btn sm ghost" title={editor?.installed ? t("detail.openWithEditor") : t("detail.editorMissing")} onclick={() => openWithEditor(c.localPath!)}><Icon name="edit" size={13} /> iureditor</button>
                   {/if}
                   <button class="btn sm ghost" title={t("detail.showInFolder")} onclick={() => reveal(c.localPath!)}><Icon name="folder" size={13} /></button>
                 {:else if c.documentId}
@@ -449,7 +449,7 @@
           <span class="hint" title={doc.path}>{t("detail.savedAt", { path: doc.path ?? "" })}{filled ? t("detail.withMeta") : ""}</span>
           <button class="btn sm ghost" onclick={() => copyDoc(kind)}><Icon name="copy" size={14} /> {t("detail.copy")}</button>
           <button class="btn sm ghost" onclick={() => openFile(doc.path!)}><Icon name="external" size={14} /> {t("detail.open")}</button>
-          <button class="btn sm ghost" title={editor?.installed ? t("detail.editorTitle") : t("detail.editorMissing")} onclick={() => openWithEditor(doc.path!)}><Icon name="edit" size={14} /> IureEditor</button>
+          <button class="btn sm ghost" title={editor?.installed ? t("detail.editorTitle") : t("detail.editorMissing")} onclick={() => openWithEditor(doc.path!)}><Icon name="edit" size={14} /> iureditor</button>
           <button class="btn sm ghost" onclick={() => generateDoc(job, kind)} title={t("detail.regenerate")}><Icon name="refresh" size={14} /></button>
         </div>
         <div class="md">{@html renderMarkdown(doc.content)}</div>
