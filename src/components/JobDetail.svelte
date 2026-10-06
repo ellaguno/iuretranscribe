@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { api, type DocKind } from "../lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, renameJob, retranscribe, toast, type Job } from "../lib/state.svelte";
+  import { app, appStatus, generateDoc, isActive, metaFilled, metaFilledByUser, openWithEditor, renameJob, retranscribe, diarizeJob, renameSpeaker, myName, toast, type Job } from "../lib/state.svelte";
   import { fmtDuration, fmtSpeed, fmtTimestamp } from "../lib/format";
   import { renderMarkdown } from "../lib/markdown";
   import Icon from "./Icon.svelte";
@@ -180,6 +180,29 @@
   let listEl = $state<HTMLDivElement | null>(null);
 
   let segments = $derived(job.result ? job.result.segments : job.liveSegments);
+  // Color de cada hablante: tú (micrófono) con el de acento, «Interlocutor» con el de
+  // aviso como siempre, y el resto por orden de aparición con los demás.
+  let me = $derived(job.speakerNames?.[0] ?? myName());
+  let speakerOrder = $derived([...new Set(segments.map((s) => s.speaker).filter((n): n is string => !!n && n !== me && !isOtherPartyLabel(n)))]);
+  // Renombrar un hablante desde su etiqueta (índice del segmento donde se editó).
+  let editSpk = $state<{ index: number; from: string; value: string } | null>(null);
+  async function commitSpeaker() {
+    const e = editSpk;
+    editSpk = null;
+    if (e) await renameSpeaker(job, e.from, e.value);
+  }
+  function focusSelect(el: HTMLInputElement) {
+    // Tras el primer ciclo: el valor enlazado todavía no está al montar.
+    setTimeout(() => {
+      el.focus();
+      el.select();
+    });
+  }
+  function speakerColor(name: string): number {
+    if (name === me) return 0;
+    if (isOtherPartyLabel(name)) return 1;
+    return (speakerOrder.indexOf(name) % 5) + 1;
+  }
   let hasKey = $derived(!!app.settings?.openrouterApiKey?.trim());
 
   $effect(() => {
@@ -251,6 +274,9 @@
             <button class="btn sm" title={o.path} onclick={() => openFile(o.path)}><Icon name="file" size={14} /> .{o.format}</button>
           {/each}
           <button class="btn sm ghost" title={t("detail.showInFolder")} onclick={() => reveal(job.result!.outputs[0]?.path ?? job.result!.outputDir)}><Icon name="folder" size={14} /></button>
+          <button class="btn sm ghost" title={app.diarReady ? t("diar.buttonHint") : t("diar.needModels")} disabled={!!app.diarizing[job.id]} onclick={() => (app.diarReady ? diarizeJob(job) : (app.view = "models"))}>
+            {#if app.diarizing[job.id]}<span class="spin"><Icon name="loader" size={14} /></span> {t("diar.running")}{:else}<Icon name="speaker" size={14} /> {t("diar.button")}{/if}
+          </button>
           <button class="btn sm ghost" title={t("detail.highQualityTitle")} disabled={app.running} onclick={() => retranscribe(job.id)}><Icon name="refresh" size={14} /> {t("detail.highQuality")}</button>
           {#if iureConfigured() || iureLoggedIn()}
             <button class="btn sm {job.iure ? '' : 'primary'}" title={job.iure ? t("detail.savedIn", { folder: job.iure.folder }) : t("detail.uploadToProject")} disabled={!!job.iureUpload} onclick={() => (showPicker = true)}>
@@ -319,7 +345,7 @@
         {#each segments as s, i (i)}
           <div class="seg" class:mine={s.speaker && i > 0 && segments[i - 1].speaker === s.speaker}>
             <span class="ts">{fmtTimestamp(s.startMs)}</span>
-            <span class="txt">{#if s.speaker}<span class="spk" class:other={isOtherPartyLabel(s.speaker)}>{s.speaker}</span> {/if}{s.text}</span>
+            <span class="txt">{#if s.speaker}{#if editSpk?.index === i}<input class="spk-edit" use:focusSelect bind:value={editSpk.value} onblur={commitSpeaker} onkeydown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); else if (e.key === "Escape") editSpk = null; }} />{:else if job.result}<button class="spk c{speakerColor(s.speaker)}" class:other={isOtherPartyLabel(s.speaker)} title={t("diar.renameHint")} onclick={() => (editSpk = { index: i, from: s.speaker!, value: s.speaker! })}>{s.speaker}</button>{:else}<span class="spk c{speakerColor(s.speaker)}" class:other={isOtherPartyLabel(s.speaker)}>{s.speaker}</span>{/if} {/if}{s.text}</span>
           </div>
         {/each}
       {/if}
@@ -507,7 +533,14 @@
   .composed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .spk { display: inline-block; padding: 0 6px; margin-right: 2px; border-radius: 6px; font-size: 12px; font-weight: 650; background: var(--accent-soft); color: var(--accent); }
-  .spk.other { background: var(--warn-soft); color: var(--warn); }
+  button.spk { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; line-height: inherit; }
+  button.spk:hover { filter: brightness(0.95); text-decoration: underline; }
+  .spk-edit { font: inherit; font-size: 12px; font-weight: 650; padding: 0 6px; width: 14ch; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg, transparent); color: var(--text); }
+  .spk.other, .spk.c1 { background: var(--warn-soft); color: var(--warn); }
+  .spk.c2 { background: var(--success-soft); color: var(--success); }
+  .spk.c3 { background: var(--danger-soft); color: var(--danger); }
+  .spk.c4 { background: color-mix(in srgb, #8b5cf6 16%, transparent); color: #8b5cf6; }
+  .spk.c5 { background: color-mix(in srgb, #0891b2 16%, transparent); color: #0891b2; }
   .seg.mine .spk { visibility: hidden; position: absolute; }
   .commits { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
   .commit { display: grid; grid-template-columns: auto 1fr 180px 150px; gap: 6px; align-items: center; }

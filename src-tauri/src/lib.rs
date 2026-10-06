@@ -1,4 +1,5 @@
 mod audio;
+mod diarize;
 mod gpu;
 mod llm;
 mod mcp;
@@ -420,6 +421,86 @@ fn save_live_transcript(state: State<'_, AppState>, mut request: LiveTranscriptR
         base_name,
         detected_language: None,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiarizeResult {
+    segments: Vec<Segment>,
+    text: String,
+    outputs: Vec<OutputFile>,
+    speakers: usize,
+    /// Se usó el canal del sistema de la grabación (tú quedas aparte de la bocina).
+    split: bool,
+    elapsed_secs: f64,
+}
+
+/// ¿Están descargados los modelos de identificación de hablantes?
+#[tauri::command]
+fn diarization_ready(state: State<'_, AppState>) -> bool {
+    models::diar_paths(&state.models_dir).is_some()
+}
+
+/// Identifica quién habla, etiqueta los segmentos y reescribe los archivos de salida.
+/// Con `names` ([tú, interlocutor]) y una grabación que guardó el canal del sistema,
+/// tú quedas aparte y sólo se separan las voces de la bocina; si no, «Hablante 1»…
+/// `num_speakers` = cuántas voces hay (en la bocina, si hay canal del sistema). Sólo se
+/// usa para no separar cuando es una: fijarlo en el agrupamiento funde voces distintas
+/// (un tramo corto se queda con un grupo y el resto cae en el otro), y el umbral solo
+/// acertó más en las pruebas.
+#[tauri::command]
+async fn diarize_job(
+    state: State<'_, AppState>,
+    path: String,
+    segments: Vec<Segment>,
+    num_speakers: Option<u32>,
+    names: Option<[String; 2]>,
+) -> Result<DiarizeResult, String> {
+    let (seg_model, emb_model) = models::diar_paths(&state.models_dir)
+        .ok_or_else(|| tr!("First download the speaker models in the Models section", "Descarga primero los modelos de hablantes en la sección Modelos"))?;
+    let settings = state.settings.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
+        let input = PathBuf::from(&path);
+        let mix = audio::decode_to_pcm16k(&input).map_err(|e| format!("{e:#}"))?;
+        let mut segments = segments;
+        let track = diarize::system_track(&input).filter(|p| p.is_file());
+        let (speakers, split) = match (track, names.filter(|n| n.iter().all(|x| !x.trim().is_empty()))) {
+            (Some(track), Some(names)) => {
+                let (mic, sys) = diarize::load_tracks(&mix, &track).map_err(|e| format!("{e:#}"))?;
+                let audible = sys.iter().any(|x| x.abs() > 0.01);
+                // Una sola persona al otro lado: no hay nada que separar en la bocina.
+                let turns = if audible && num_speakers != Some(1) {
+                    diarize::diarize(&seg_model, &emb_model, &sys, None).map_err(|e| format!("{e:#}"))?
+                } else {
+                    Vec::new()
+                };
+                (diarize::assign_split(&mut segments, &turns, &names, &mic, &sys), true)
+            }
+            _ => {
+                let turns = diarize::diarize(&seg_model, &emb_model, &mix, None).map_err(|e| format!("{e:#}"))?;
+                (diarize::assign(&mut segments, &turns), false)
+            }
+        };
+        let (outputs, _, _) = write_outputs(&settings, &input, &segments)?;
+        log::info!(
+            "hablantes: {speakers}{} en {:.0} s de audio ({:.1} s)",
+            if split { " en la bocina" } else { "" },
+            mix.len() as f64 / audio::TARGET_RATE as f64,
+            t0.elapsed().as_secs_f64()
+        );
+        Ok(DiarizeResult { text: subtitles::to_plain(&segments), segments, outputs, speakers, split, elapsed_secs: t0.elapsed().as_secs_f64() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Reescribe los archivos de salida con los segmentos editados (p. ej. al renombrar
+/// o fusionar hablantes).
+#[tauri::command]
+fn rewrite_outputs(state: State<'_, AppState>, path: String, segments: Vec<Segment>) -> Result<Vec<OutputFile>, String> {
+    let settings = state.settings.lock().unwrap().clone();
+    write_outputs(&settings, Path::new(&path), &segments).map(|(outputs, _, _)| outputs)
 }
 
 #[tauri::command]
@@ -1209,6 +1290,7 @@ fn rename_job(path: String, output_dir: Option<String>, base_name: Option<String
         moved.push((from.clone(), to.clone()));
     }
     let new_path = src.with_file_name(format!("{new_name}{ext}"));
+    diarize::rename_track(&src, &new_path);
     Ok(RenamedJob {
         path: new_path.to_string_lossy().into_owned(),
         name: format!("{new_name}{ext}"),
@@ -1470,6 +1552,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let models_dir = data_dir.join("models");
             std::fs::create_dir_all(&models_dir)?;
+            diarize::set_tracks_dir(data_dir.join("tracks"));
             let bundled_models_dir = app.path().resource_dir().ok().map(|r| r.join("models")).filter(|d| d.is_dir());
             let settings_path = config_dir.join("settings.json");
             let mut settings = Settings::load(&settings_path);
@@ -1561,6 +1644,9 @@ pub fn run() {
             reveal_path,
             read_text_file,
             rename_job,
+            diarization_ready,
+            diarize_job,
+            rewrite_outputs,
             apps_status,
             open_with_app,
             launch_app,

@@ -38,7 +38,7 @@ const settings: any = {
   recordMic: true, recordSystem: true, micDevice: null, autoTranscribeRecording: true,
   liveTranscription: true, liveChunkSecs: 8, liveIsFinal: true,
   iureDomain: "demo.iurefficient.com", iureEmail: "ana@example.com", iureAppPassword: "", iureUploadMedia: true, iureLastFolder: null,
-  iureAutoCompose: true, speakerSplit: true, myName: "Ana Torres", checkUpdates: false,
+  iureAutoCompose: true, speakerSplit: true, autoDiarize: true, myName: "Ana Torres", checkUpdates: false,
   uiLanguage: LANG,
 };
 
@@ -221,6 +221,14 @@ mockIPC(
         const base = REC.split("/").pop()!.replace(/\.wav$/, "");
         return { jobId: r.jobId, segments: r.segments, text: r.segments.map((x: any) => `${x.speaker}: ${x.text}`).join("\n"), audioSecs: r.audioSecs, elapsedSecs: r.audioSecs, outputs: [{ format: "srt", path: `${RECDIR}/${base}.srt` }, { format: "txt", path: `${RECDIR}/${base}.txt` }], outputDir: RECDIR, baseName: base, detectedLanguage: LANG };
       }
+      case "diarization_ready": return true;
+      case "diarize_job": {
+        // Ficticio: alterna dos voces al otro lado y deja tuyo lo que ya lo era.
+        const [me, other] = args.names ?? [null, L("Other party", "Interlocutor")];
+        const segments = args.segments.map((x: any, i: number) => ({ ...x, speaker: x.speaker === me ? me : `${args.names ? other : L("Speaker", "Hablante")} ${(i % 2) + 1}` }));
+        return { segments, text: segments.map((x: any) => `${x.speaker}: ${x.text}`).join(" "), outputs: [], speakers: 2, split: !!args.names, elapsedSecs: 4 };
+      }
+      case "rewrite_outputs": return [];
       case "generate_document": return new Promise((resolve) => { docs[args.request.kind] = resolve; });
       case "apps_status": return apps;
       case "iuredav_mounts": return [];

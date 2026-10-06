@@ -84,6 +84,8 @@ pub struct Settings {
     pub iure_auto_compose: bool,
     /// Al grabar micrófono y sistema, transcribir cada fuente por separado («quién habló»).
     pub speaker_split: bool,
+    /// Identificar quién habla al terminar cada transcripción (si están los modelos).
+    pub auto_diarize: bool,
     /// Nombre del usuario para etiquetar el micrófono.
     pub my_name: String,
     /// Consultar en GitHub si hay una versión nueva al arrancar.
@@ -132,6 +134,7 @@ impl Default for Settings {
             iure_last_folder: None,
             iure_auto_compose: true,
             speaker_split: true,
+            auto_diarize: true,
             my_name: String::new(),
             check_updates: true,
             gpu_probe_result: String::new(),

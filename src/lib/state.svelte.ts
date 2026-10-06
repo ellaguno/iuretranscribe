@@ -130,6 +130,8 @@ export interface Job {
   meta: JobMeta;
   iure?: IureSaved;
   iureUpload?: { fileName: string; index: number; totalFiles: number; sent: number; total: number } | null;
+  /** Grabación con micrófono y sistema: [tú, interlocutor] para identificar hablantes. */
+  speakerNames?: [string, string];
   startedAt?: number;
   finishedAt?: number;
 }
@@ -175,6 +177,10 @@ export const app = $state({
   apps: null as AppStatus[] | null,
   /** Unidades de IureDav configuradas en este equipo. */
   davMounts: [] as DavMount[],
+  /** Modelos de identificación de hablantes descargados (null = sin consultar). */
+  diarReady: null as boolean | null,
+  /** Trabajos a los que se les está identificando hablantes. */
+  diarizing: {} as Record<string, boolean>,
   /** Instrucciones predeterminadas de resumen y minuta en el idioma actual. */
   defaultPrompts: { summary: "", minutes: "" },
 });
@@ -310,6 +316,7 @@ function serializeJobs(): string {
     minutes: j.minutes.status === "loading" ? { status: "idle" } : j.minutes,
     meta: { participants: j.meta.participants, date: j.meta.date, place: j.meta.place, notes: j.meta.notes },
     iure: j.iure,
+    speakerNames: j.speakerNames,
     startedAt: j.startedAt,
     finishedAt: j.finishedAt,
   }));
@@ -387,6 +394,7 @@ export async function init() {
   await restoreJobs();
   startPersistence();
   refreshIureSession();
+  refreshDiarReady();
   // Si se inició sesión en otra app de Iurefficient, al volver a esta ventana se toma
   // del llavero compartido sin reiniciar.
   window.addEventListener("focus", () => {
@@ -414,6 +422,12 @@ export async function init() {
   });
   await listen<DownloadProgress>("model-download-progress", (e) => {
     const p = e.payload;
+    if (p.id.startsWith("diar-")) {
+      // Los dos modelos de hablantes se descargan juntos: el aviso lo da downloadDiarModels.
+      if (p.status === "downloading") app.downloads[p.id] = { downloaded: p.downloaded, total: p.total };
+      else delete app.downloads[p.id];
+      return;
+    }
     if (p.status === "downloading") {
       app.downloads[p.id] = { downloaded: p.downloaded, total: p.total };
     } else {
@@ -555,15 +569,28 @@ function stopPolling() {
 }
 
 /** Nombres para etiquetar [micrófono, sistema] a partir de tu nombre y los asistentes capturados. */
-export function speakerNames(): [string, string] {
-  const s = app.settings;
-  const me = (s?.myName?.trim() || app.iureSession?.name?.trim() || t("record.me")).split(" ").slice(0, 2).join(" ");
-  const others = app.pendingMeta.participants
-    .split(/\n|,|;/)
-    .map((x) => x.trim())
-    .filter((x) => x && !x.toLowerCase().includes(me.toLowerCase().split(" ")[0]));
+export function speakerNames(meta: JobMeta = app.pendingMeta): [string, string] {
+  const me = myName();
+  const others = otherParticipants(meta, me);
   const other = others.length === 1 ? others[0].split(" ").slice(0, 2).join(" ") : t("record.otherParty");
   return [me, other];
+}
+
+export function myName(): string {
+  const s = app.settings;
+  return (s?.myName?.trim() || app.iureSession?.name?.trim() || t("record.me")).split(" ").slice(0, 2).join(" ");
+}
+
+function participants(meta: JobMeta): string[] {
+  return meta.participants
+    .split(/\n|,|;/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/** Asistentes capturados que no eres tú. */
+function otherParticipants(meta: JobMeta, me = myName()): string[] {
+  return participants(meta).filter((x) => !x.toLowerCase().includes(me.toLowerCase().split(" ")[0]));
 }
 
 /** Texto de un segmento con el hablante como prefijo. */
@@ -603,6 +630,8 @@ export async function stopRecording() {
     if (job) {
       job.meta = { ...app.pendingMeta };
       job.liveSegments = live;
+      // Con las dos fuentes se guardó el canal del sistema: tú quedas aparte al identificar hablantes.
+      if (app.settings?.recordMic && app.settings?.recordSystem) job.speakerNames = speakerNames(job.meta);
       app.selectedJobId = job.id;
     }
     app.pendingMeta = emptyMeta();
@@ -705,6 +734,7 @@ async function runJob(job: Job) {
     job.percent = 100;
     job.finishedAt = Date.now();
     const s = app.settings;
+    if (s?.autoDiarize && app.diarReady) await diarizeJob(job, true);
     if (s?.autoSummary) await generateDoc(job, "summary");
     if (s?.autoMinutes) await generateDoc(job, "minutes");
   } catch (e) {
@@ -727,6 +757,7 @@ async function finalizeFromLive(job: Job, segments: Segment[], audioSecs: number
     job.startedAt = Date.now() - elapsedSecs * 1000;
     job.finishedAt = Date.now();
     const s = app.settings;
+    if (s?.autoDiarize && app.diarReady) await diarizeJob(job, true);
     if (s?.autoSummary) await generateDoc(job, "summary");
     if (s?.autoMinutes) await generateDoc(job, "minutes");
   } catch (e) {
@@ -1106,6 +1137,73 @@ export async function downloadModel(id: string) {
     delete app.downloads[id];
     await refreshModels();
     if (!/cancel/i.test(String(e))) toast(String(e), "error", 8000);
+  }
+}
+
+export const DIAR_MODELS = ["diar-segmentation", "diar-embedding"];
+
+export async function refreshDiarReady() {
+  try {
+    app.diarReady = await api.diarizationReady();
+  } catch {
+    app.diarReady = false;
+  }
+}
+
+/** Descarga los dos modelos de identificación de hablantes (~34 MB). */
+export async function downloadDiarModels() {
+  try {
+    for (const id of DIAR_MODELS) {
+      app.downloads[id] = { downloaded: 0, total: null };
+      await api.downloadModel(id);
+    }
+    toast(t("diar.downloaded"), "success");
+  } catch (e) {
+    if (!/cancel/i.test(String(e))) toast(t("diar.downloadError", { error: String(e) }), "error", 8000);
+  } finally {
+    for (const id of DIAR_MODELS) delete app.downloads[id];
+    await refreshDiarReady();
+  }
+}
+
+/**
+ * Identifica quién habla y reescribe los archivos. En una grabación con micrófono y
+ * sistema, si los asistentes capturados dicen que al otro lado hay una sola persona, no
+ * se separa la bocina. `auto` = tras transcribir (sin notificación del sistema).
+ */
+export async function diarizeJob(job: Job, auto = false) {
+  if (!job.result || app.diarizing[job.id]) return;
+  app.diarizing[job.id] = true;
+  try {
+    const names = job.speakerNames ?? null;
+    const single = !!names && otherParticipants(job.meta).length === 1;
+    const r = await api.diarizeJob(job.path, job.result.segments, single ? 1 : null, names);
+    job.result.segments = r.segments;
+    job.result.outputs = r.outputs;
+    job.result.text = r.text;
+    const secs = Math.round(r.elapsedSecs);
+    toast(tn(r.split ? "diar.doneSplit" : "diar.done", r.speakers, { secs }), "success", 7000);
+    if (!auto) notify("IureTranscribe", t("diar.notify", { name: job.name }));
+  } catch (e) {
+    toast(String(e), "error", 9000);
+  } finally {
+    delete app.diarizing[job.id];
+  }
+}
+
+/** Renombra un hablante en toda la transcripción (con un nombre ya usado, se fusionan) y reescribe los archivos. */
+export async function renameSpeaker(job: Job, from: string, to: string) {
+  const name = to.trim();
+  if (!job.result || !name || name === from) return;
+  const segments = job.result.segments.map((s) => (s.speaker === from ? { ...s, speaker: name } : s));
+  try {
+    job.result.outputs = await api.rewriteOutputs(job.path, segments);
+    job.result.segments = segments;
+    job.result.text = segments.map(segmentLine).filter(Boolean).join(" ");
+    if (job.speakerNames?.[0] === from) job.speakerNames = [name, job.speakerNames[1]];
+    toast(t("diar.renamed", { from, to: name }), "success", 4000);
+  } catch (e) {
+    toast(String(e), "error", 8000);
   }
 }
 

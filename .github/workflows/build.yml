@@ -168,6 +168,32 @@ jobs:
           curl -sSL --retry 3 -o src-tauri/resources/models/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
           ls -la src-tauri/resources/models
 
+      # Identificación de hablantes: ejecutable aparte (sidecar) porque onnxruntime
+      # estático y whisper.cpp no conviven en el mismo binario. Tauri lo busca como
+      # binaries/iuretranscribe-diarize-<triple> y lo instala junto a la app.
+      - name: Sidecar de identificación de hablantes
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          TARGET=$(echo "${{ matrix.args }}" | sed -n 's/.*--target \([^ ]*\).*/\1/p')
+          TRIPLE=${TARGET:-$(rustc -vV | sed -n 's/^host: //p')}
+          cargo build --release --target "$TRIPLE" --manifest-path src-tauri/diarizer/Cargo.toml --target-dir src-tauri/diarizer/target
+          mkdir -p src-tauri/binaries
+          cp "src-tauri/diarizer/target/$TRIPLE/release/iuretranscribe-diarize" "src-tauri/binaries/iuretranscribe-diarize-$TRIPLE"
+          ls -la src-tauri/binaries
+      # En Windows con PowerShell: tras msvc-dev-cmd, Git Bash antepone /usr/bin y
+      # `link` sería el de coreutils en lugar del enlazador de MSVC.
+      - name: Sidecar de identificación de hablantes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $triple = ((rustc -vV) | Select-String '^host: ').ToString().Substring(6).Trim()
+          cargo build --release --manifest-path src-tauri/diarizer/Cargo.toml --target-dir src-tauri/diarizer/target
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item src-tauri/diarizer/target/release/iuretranscribe-diarize.exe "src-tauri/binaries/iuretranscribe-diarize-$triple.exe"
+          Get-ChildItem src-tauri/binaries
+
       - name: Compilar y empaquetar
         uses: tauri-apps/tauri-action@v0
         env:

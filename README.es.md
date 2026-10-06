@@ -76,6 +76,11 @@
 - Grabación integrada del micrófono y del audio del sistema con transcripción en vivo y, si
   ambas fuentes están activas, **quién habló**: cada fuente se transcribe por separado y los
   segmentos llevan tu nombre o «Interlocutor».
+- **Identificación de hablantes** sin conexión (complemento de ~34 MB en Modelos): distingue
+  las voces de cualquier audio («Hablante 1», «Hablante 2»…). En las grabaciones con micrófono
+  y sistema, tú quedas aparte y se separan entre sí las voces de la bocina («Interlocutor 1»,
+  «Interlocutor 2»…). Usa segmentación pyannote 3.0 y huellas de voz con
+  [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), en un ejecutable aparte.
 - Con la minuta generada por Iurefficient, **compromisos → tareas**: la app lee los compromisos
   que detecta la instancia, permite corregir responsable y fecha, y los crea como tareas del
   proyecto.

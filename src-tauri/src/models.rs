@@ -73,20 +73,53 @@ const CATALOG: &[CatalogEntry] = &[
         description_es: "El más pequeño. Sólo para pruebas rápidas." },
 ];
 
+/// Modelos de identificación de hablantes (sherpa-onnx): no son de whisper, no salen
+/// en la lista de modelos y se descargan con el mismo mecanismo.
+pub const DIAR_SEGMENTATION: &str = "diar-segmentation";
+pub const DIAR_EMBEDDING: &str = "diar-embedding";
+const DIAR_FILES: &[(&str, &str, &str)] = &[
+    (DIAR_SEGMENTATION, "pyannote-segmentation-3.0.onnx", "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx"),
+    // CAM++ (3D-Speaker): en pruebas con radio mexicana separó mejor que WeSpeaker y es más ligero.
+    (DIAR_EMBEDDING, "3dspeaker-campplus-zh-en-advanced.onnx", "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"),
+];
+
+fn diar(id: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    DIAR_FILES.iter().find(|d| d.0 == id)
+}
+
 pub fn file_name(id: &str) -> String {
-    format!("ggml-{id}.bin")
+    match diar(id) {
+        Some(d) => d.1.to_string(),
+        None => format!("ggml-{id}.bin"),
+    }
 }
 
 pub fn model_url(id: &str) -> String {
-    format!("{HF_BASE}/{}", file_name(id))
+    match diar(id) {
+        Some(d) => d.2.to_string(),
+        None => format!("{HF_BASE}/{}", file_name(id)),
+    }
+}
+
+/// Rutas de los dos modelos de hablantes, si ya están descargados.
+pub fn diar_paths(models_dir: &Path) -> Option<(PathBuf, PathBuf)> {
+    let seg = model_path(models_dir, DIAR_SEGMENTATION);
+    let emb = model_path(models_dir, DIAR_EMBEDDING);
+    (file_ok(&seg) && file_ok(&emb)).then_some((seg, emb))
 }
 
 pub fn model_path(models_dir: &Path, id: &str) -> PathBuf {
     models_dir.join(file_name(id))
 }
 
+/// Modelo de whisper del catálogo (los de hablantes no sirven para transcribir).
 pub fn is_known(id: &str) -> bool {
     CATALOG.iter().any(|e| e.id == id)
+}
+
+/// Se puede descargar o borrar: un modelo de whisper o uno de hablantes.
+pub fn is_downloadable(id: &str) -> bool {
+    is_known(id) || diar(id).is_some()
 }
 
 fn file_ok(p: &Path) -> bool {
@@ -176,7 +209,7 @@ fn emit(app: &AppHandle, p: DownloadProgress) {
 
 /// Descarga (o reanuda) un modelo. Emite eventos `model-download-progress`.
 pub async fn download(app: AppHandle, models_dir: PathBuf, id: String, downloads: Arc<Downloads>) -> Result<(), String> {
-    if !is_known(&id) {
+    if !is_downloadable(&id) {
         return Err(tr!("Unknown model: {id}", "Modelo desconocido: {id}"));
     }
     let Some(cancel) = downloads.start(&id) else {
@@ -206,10 +239,10 @@ async fn download_inner(app: &AppHandle, models_dir: &Path, id: &str, cancel: Ar
     if existing > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={existing}-"));
     }
-    let resp = req.send().await.map_err(|e| tr!("Could not connect to Hugging Face: {e}", "No se pudo conectar con Hugging Face: {e}"))?;
+    let resp = req.send().await.map_err(|e| tr!("Could not connect to the model server: {e}", "No se pudo conectar con el servidor de modelos: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(tr!("Hugging Face responded {status}", "Hugging Face respondió {status}"));
+        return Err(tr!("The model server responded {status}", "El servidor de modelos respondió {status}"));
     }
     let resuming = status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0;
     let mut downloaded = if resuming { existing } else { 0 };

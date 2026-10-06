@@ -34,6 +34,7 @@ export interface Settings {
   iureLastFolder: string | null;
   iureAutoCompose: boolean;
   speakerSplit: boolean;
+  autoDiarize: boolean;
   myName: string;
   checkUpdates: boolean;
   /** Idioma de la interfaz: "auto" (el del sistema), "en" o "es". */
@@ -389,6 +390,16 @@ export interface GpuNotice {
   url: string;
 }
 
+export interface DiarizeResult {
+  segments: Segment[];
+  text: string;
+  outputs: OutputFile[];
+  speakers: number;
+  /** Se usó el canal del sistema: tú quedas aparte y sólo se separan las voces de la bocina. */
+  split: boolean;
+  elapsedSecs: number;
+}
+
 export const api = {
   checkUpdateNotice: () => invoke<UpdateNotice | null>("check_update_notice"),
   agentsStatus: () => invoke<AgentsStatus>("agents_status"),
@@ -462,6 +473,10 @@ export const api = {
   launchArgs: () => invoke<string[]>("launch_args"),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   readTextFile: (path: string) => invoke<string>("read_text_file", { path }),
+  rewriteOutputs: (path: string, segments: Segment[]) => invoke<OutputFile[]>("rewrite_outputs", { path, segments }),
+  diarizationReady: () => invoke<boolean>("diarization_ready"),
+  diarizeJob: (path: string, segments: Segment[], numSpeakers: number | null, names: [string, string] | null) =>
+    invoke<DiarizeResult>("diarize_job", { path, segments, numSpeakers, names }),
   renameJob: (path: string, outputDir: string | null, baseName: string | null, newName: string) =>
     invoke<{ path: string; name: string; baseName: string; moved: [string, string][] }>("rename_job", { path, outputDir, baseName, newName }),
 };

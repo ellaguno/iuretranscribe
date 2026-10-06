@@ -96,6 +96,7 @@ struct Active {
     stop: Arc<AtomicBool>,
     started: Instant,
     path: PathBuf,
+    sys_track: Option<PathBuf>,
     mixer: Option<JoinHandle<Result<u64>>>,
     workers: Vec<JoinHandle<()>>,
     children: Arc<Mutex<Vec<std::process::Child>>>,
@@ -174,14 +175,18 @@ impl Recorder {
         };
         let is_live = live_worker.is_some();
 
+        // Con las dos fuentes se guarda además el canal del sistema, para separar después
+        // las voces de la bocina (identificación de hablantes).
+        let sys_track = if sources[MIC] && sources[SYS] { crate::diarize::system_track(&path) } else { None };
         let mixer = {
             let path = path.clone();
+            let sys_track = sys_track.clone();
             let stop = stop.clone();
             let levels = [self.levels[0].clone(), self.levels[1].clone()];
             let err_slot = self.last_error.clone();
-            std::thread::spawn(move || mixer(rx, &path, sources, stop, levels, err_slot, live_tx, split))
+            std::thread::spawn(move || mixer(rx, &path, sys_track.as_deref(), sources, stop, levels, err_slot, live_tx, split))
         };
-        *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), mixer: Some(mixer), workers, children, live_worker, live: is_live });
+        *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), sys_track, mixer: Some(mixer), workers, children, live_worker, live: is_live });
         Ok(path)
     }
 
@@ -215,6 +220,9 @@ impl Recorder {
         }
         if samples < TARGET_RATE as u64 / 2 {
             let _ = std::fs::remove_file(&active.path);
+            if let Some(t) = &active.sys_track {
+                let _ = std::fs::remove_file(t);
+            }
             let detail = self.last_error.lock().unwrap().clone().unwrap_or_default();
             return Err(anyhow!(tr!("The recording captured no audio. {detail}", "La grabación no captó audio. {detail}")));
         }
@@ -240,10 +248,13 @@ impl Recorder {
     }
 }
 
-/// Mezcla las fuentes (ya en mono 16 kHz) y escribe el WAV. Devuelve muestras escritas.
+/// Mezcla las fuentes (ya en mono 16 kHz) y escribe el WAV; con `sys_track`, también
+/// el canal del sistema solo, muestra a muestra con la mezcla. Devuelve muestras escritas.
+#[allow(clippy::too_many_arguments)]
 fn mixer(
     rx: Receiver<Msg>,
     path: &Path,
+    sys_track: Option<&Path>,
     sources: [bool; 2],
     stop: Arc<AtomicBool>,
     levels: [Arc<AtomicU32>; 2],
@@ -253,6 +264,10 @@ fn mixer(
 ) -> Result<u64> {
     let spec = hound::WavSpec { channels: 1, sample_rate: TARGET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!(tr!("Could not create {}: {e}", "No se pudo crear {}: {e}", path.display())))?;
+    // Si no se puede crear el canal del sistema se graba igual: sólo se pierde separar voces.
+    let mut sys_writer = sys_track.and_then(|p| {
+        hound::WavWriter::create(p, spec).map_err(|e| log::warn!("no se pudo crear el canal del sistema {}: {e}", p.display())).ok()
+    });
     let mut queues: [VecDeque<f32>; 2] = [VecDeque::new(), VecDeque::new()];
     let mut alive = sources;
     let mut written = 0u64;
@@ -266,6 +281,9 @@ fn mixer(
             let a: f32 = $a;
             let b: f32 = $b;
             writer.write_sample(to_i16(a + b))?;
+            if let Some(w) = sys_writer.as_mut() {
+                w.write_sample(to_i16(b))?;
+            }
             written += 1;
             if live_tx.is_some() {
                 if split {
@@ -281,6 +299,9 @@ fn mixer(
         ($i:expr, $s:expr) => {{
             let v: f32 = $s;
             writer.write_sample(to_i16(v))?;
+            if let Some(w) = sys_writer.as_mut() {
+                w.write_sample(if $i == SYS { to_i16(v) } else { 0 })?;
+            }
             written += 1;
             if live_tx.is_some() {
                 if split {
@@ -359,6 +380,9 @@ fn mixer(
     }
     drop(live_tx); // cierra el canal: el hilo en vivo transcribe lo pendiente y termina
     writer.finalize()?;
+    if let Some(w) = sys_writer {
+        w.finalize()?;
+    }
     Ok(written)
 }
 

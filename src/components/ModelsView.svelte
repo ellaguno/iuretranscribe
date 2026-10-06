@@ -1,15 +1,22 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, downloadModel, cancelDownload, deleteModel, saveSettings, refreshModels, toast } from "../lib/state.svelte";
+  import { app, downloadModel, cancelDownload, deleteModel, downloadDiarModels, DIAR_MODELS, refreshDiarReady, saveSettings, refreshModels, toast } from "../lib/state.svelte";
   import { fmtBytes, fmtMb } from "../lib/format";
   import Icon from "./Icon.svelte";
   import { t } from "../lib/i18n.svelte";
 
+  const DIAR_SIZE_MB = 34;
   const qualityLabel = (q: string) => (q === "alta" ? t("models.qualityHigh") : q === "media" ? t("models.qualityMedium") : t("models.qualityBasic"));
 
   function use(id: string) {
     saveSettings({ modelId: id });
     toast(t("models.selected"), "success", 2000);
+  }
+  let diarDl = $derived(DIAR_MODELS.map((id) => app.downloads[id]).find(Boolean));
+  async function deleteDiar() {
+    for (const id of DIAR_MODELS) await api.deleteModel(id).catch(() => {});
+    await refreshDiarReady();
+    toast(t("diar.deleted"), "info");
   }
   function openDir() {
     if (app.sys) api.openPath(app.sys.modelsDir).catch((e) => toast(String(e), "error"));
@@ -19,7 +26,7 @@
 <header class="top">
   <div>
     <h1>{t("models.title")}</h1>
-    <p class="hint">{t("models.hint")}</p>
+    <p class="hint">{t("models.hintAll")}</p>
   </div>
   <div class="hactions">
     <button class="btn ghost sm" onclick={refreshModels}><Icon name="refresh" size={15} /> {t("models.refresh")}</button>
@@ -28,6 +35,37 @@
 </header>
 
 <div class="list scroll">
+  <div class="card model diar">
+    <div class="mhead">
+      <div class="mtitle">
+        <h3><Icon name="speaker" size={16} /> {t("diar.title")}</h3>
+        {#if app.diarReady}<span class="pill success"><Icon name="check" size={11} stroke={3} /> {t("diar.ready")}</span>{/if}
+      </div>
+      <span class="size">{fmtMb(DIAR_SIZE_MB)}</span>
+    </div>
+    <p class="desc">{t("diar.desc")}</p>
+    {#if app.diarReady && app.settings}
+      <label class="auto">
+        <button class="switch" class:on={app.settings.autoDiarize} aria-label={t("diar.auto")} onclick={() => saveSettings({ autoDiarize: !app.settings?.autoDiarize })}></button>
+        <span>{t("diar.auto")}</span>
+      </label>
+    {/if}
+    <div class="mfoot">
+      <span class="pill">{t("diar.addon")}</span>
+      <span class="spacer"></span>
+      {#if diarDl}
+        <div class="dl">
+          <div class="progress" class:indeterminate={!diarDl.total}><div style="width:{diarDl.total ? (diarDl.downloaded / diarDl.total) * 100 : 0}%"></div></div>
+          <span class="hint">{fmtBytes(diarDl.downloaded)}{diarDl.total ? ` / ${fmtBytes(diarDl.total)}` : ""}</span>
+        </div>
+        <button class="btn sm danger" onclick={() => DIAR_MODELS.forEach((id) => cancelDownload(id))}><Icon name="x" size={14} /> {t("models.cancel")}</button>
+      {:else if app.diarReady}
+        <button class="btn sm ghost danger" title={t("models.delete")} onclick={deleteDiar}><Icon name="trash" size={14} /></button>
+      {:else}
+        <button class="btn sm primary" onclick={downloadDiarModels}><Icon name="download" size={14} /> {t("models.download")}</button>
+      {/if}
+    </div>
+  </div>
   {#each app.models as m (m.id)}
     {@const dl = app.downloads[m.id]}
     {@const current = app.settings?.modelId === m.id}
@@ -72,6 +110,8 @@
   .list { flex: 1; min-height: 0; padding: 0 26px 26px; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; align-content: start; }
   .model { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
   .model.current { border-color: var(--accent); }
+  .diar h3 { display: inline-flex; align-items: center; gap: 6px; }
+  .auto { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); cursor: pointer; }
   .mhead { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
   .mtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .size { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
