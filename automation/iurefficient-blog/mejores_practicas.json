@@ -1,5 +1,5 @@
 {
- "_nota": "Plan de artículos de mejores prácticas. iurecms.py practicas elige el siguiente. Se pueden añadir temas al final de cada sector.",
+ "_nota": "Plan de artículos de mejores prácticas. iurecms.py practicas elige el siguiente. Se pueden añadir temas al final de cada sector. Sector «apps»: artículos que presentan las apps de Eduardo (IureTranscribe, IureOCR, iureditor, IureDav, iureTI); entra en la rotación y toca cada 6 artículos (~12 días). Añadir temas nuevos al final de ese sector.",
  "cada_dias": 2,
  "categoria": "Mejores prácticas",
  "rotacion": [
@@ -7,7 +7,8 @@
   "pmo",
   "consultoria",
   "fiscal",
-  "derecho"
+  "derecho",
+  "apps"
  ],
  "sectores": {
   "ti": {
@@ -29,6 +30,10 @@
   "derecho": {
    "nombre": "Derecho",
    "cabecera": "derecho"
+  },
+  "apps": {
+   "nombre": "Apps Iure",
+   "cabecera": "teams"
   }
  },
  "temas": [
@@ -311,6 +316,51 @@
    "titulo": "Secreto profesional en la era de la nube y la IA",
    "menciona_iurefficient": false,
    "funciones": ""
+  },
+  {
+   "sector": "apps",
+   "slug": "apps-iure-transcribir-juntas-en-tu-equipo",
+   "titulo": "Transcribir juntas sin que el audio salga de tu equipo",
+   "menciona_iurefficient": true,
+   "app": "IureTranscribe",
+   "repo": "ellaguno/iuretranscribe",
+   "funciones": "Presentar la app IureTranscribe (README público de ellaguno/iuretranscribe) y cómo se conecta con Iurefficient"
+  },
+  {
+   "sector": "apps",
+   "slug": "apps-iure-ocr-local-escaneos-buscables",
+   "titulo": "De escaneo a PDF con texto buscable, en tu propio equipo",
+   "menciona_iurefficient": true,
+   "app": "IureOCR",
+   "repo": "ellaguno/iureocr",
+   "funciones": "Presentar la app IureOCR (README público de ellaguno/iureocr) y cómo se conecta con Iurefficient"
+  },
+  {
+   "sector": "apps",
+   "slug": "apps-iure-markdown-wysiwyg-para-documentar",
+   "titulo": "Documentar en Markdown sin pelearse con el formato",
+   "menciona_iurefficient": true,
+   "app": "iureditor",
+   "repo": "ellaguno/iureditor",
+   "funciones": "Presentar la app iureditor (README público de ellaguno/iureditor) y cómo se conecta con Iurefficient"
+  },
+  {
+   "sector": "apps",
+   "slug": "apps-iure-expediente-como-unidad-de-red",
+   "titulo": "Tu expediente como una unidad más de tu computadora",
+   "menciona_iurefficient": true,
+   "app": "IureDav",
+   "repo": "ellaguno/iuredav",
+   "funciones": "Presentar la app IureDav (README público de ellaguno/iuredav) y cómo se conecta con Iurefficient"
+  },
+  {
+   "sector": "apps",
+   "slug": "apps-iure-descubrir-activos-de-ti-con-una-sonda",
+   "titulo": "Descubrir los equipos de la red en vez de capturarlos a mano",
+   "menciona_iurefficient": true,
+   "app": "iureTI",
+   "repo": "ellaguno/iureTI",
+   "funciones": "Presentar la app iureTI (README público de ellaguno/iureTI) y cómo se conecta con Iurefficient"
   }
  ]
 }

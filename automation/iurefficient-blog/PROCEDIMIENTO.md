@@ -146,3 +146,29 @@ publican. Se publica en el perfil personal de Eduardo con `linkedin.py` (token e
 5. Si LinkedIn responde 401, el token caducó: no reintentar y avisar en el resumen que hay que
    renovarlo (Token generator de LinkedIn Developers, app Iurefficient).
 6. Nunca publicar dos veces el mismo post: si la respuesta fue 201 o trae un `urn`, ya está.
+
+---
+
+# Artículos de las apps Iure (sector «apps»)
+
+Eduardo pidió (8-oct-2026) que, de vez en cuando, los artículos promuevan sus propias apps:
+**IureTranscribe, IureOCR, iureditor, IureDav e iureTI**. Ya están en la rotación de mejores
+prácticas como sector `apps` («Apps Iure», último de la rotación: toca cada 6 artículos, unos 12
+días). Se siguen las mismas tres partes (artículo ES/EN, imagen, LinkedIn) con estas diferencias:
+
+1. **Investigar sólo en lo documentado**: lee con WebFetch el README público del repo del tema
+   (campo `repo` de `mejores_practicas.json`, p. ej. `https://raw.githubusercontent.com/<repo>/main/README.md`,
+   probando `master` si no existe) y, para IureTranscribe, el repo local. Afirmar únicamente lo que
+   diga el README o la interfaz; no inventar funciones, versiones ni cifras. Si no se puede leer el
+   README, no publicar ese tema y decirlo en el resumen.
+2. **Enfoque**: el problema práctico que resuelve la app (un despacho que necesita transcribir una
+   junta, un PMO que documenta, un área de TI que inventaría), cómo se usa en 3–5 pasos y para quién
+   *no* es. Después, una sección `<h2>Cómo se conecta con Iurefficient</h2>` con lo que diga el
+   README (por ejemplo IureDav monta Iurefficient como unidad; iureTI alimenta el inventario;
+   IureTranscribe puede redactar la minuta por una instancia de Iurefficient). Enlazar al repo y a
+   la última versión publicada para descargar. Sin lenguaje de folleto.
+3. **Pantallas**: usar las capturas del propio repo de la app (README/`docs/media`), miradas y
+   recortadas igual que las de Iurefficient; si no hay, publicar sin pantalla.
+4. **LinkedIn**: voz de `VOZ_LINKEDIN.md`. Estas apps son de Eduardo, así que se pueden presentar
+   como «algo que construí/uso», sin inventar anécdotas. Mismo modo revisión hasta el 13-oct-2026.
+5. Si todos los temas de `apps` se agotaron, decirlo en el resumen para añadir más al final del sector.
