@@ -1,0 +1,7 @@
+{
+ "text": "Hay una carpeta en casi todas las oficinas con grabaciones de juntas que nadie volvió a abrir. Una hora de audio no se busca, no se cita y no se vuelve tarea.\n\nPersonalmente creo que el freno no es la flojera sino la desconfianza: mandar una junta con clientes, precios o estrategia a un servicio en la nube no es algo que todos quieran hacer. Por eso uso IureTranscribe, una app de escritorio que armé: transcribe con Whisper en tu propia computadora y el audio no sale de ahí.\n\nLo que me parece útil:\n\n• No necesita cuenta ni internet para transcribir.\n• Puede grabar la junta y marcar quién habló: tú o la otra parte.\n• Le das tu vocabulario (nombres, términos) y corrige lo que Whisper siempre escribe mal.\n• Tú decides quién redacta la minuta, y sólo ese texto sale del equipo.\n• Si usas Iurefficient, guarda transcripción y minuta en el expediente, o en el CRM.\n\nPara quién no es: los instaladores aún no están firmados y, sin GPU, un audio largo tarda. Pruébala con una junta real.\n\n¿Qué hacen hoy con las grabaciones de sus juntas?\n\n#Transcripción #MinutasDeReunión",
+ "url": "https://iurefficient.com/articulos/apps-iure-transcribir-juntas-en-tu-equipo",
+ "title": "Transcribir juntas sin que el audio salga de tu equipo",
+ "description": "IureTranscribe: Whisper en tu computadora, minuta lista y guardada en el expediente.",
+ "image_url": "https://iurefficient.com/uploads/2026/10/hero-apps.png"
+}
