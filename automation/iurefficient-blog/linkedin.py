@@ -110,7 +110,7 @@ def upload_image(author, path):
     val = j["value"]
     with open(path, "rb") as f:
         req = urllib.request.Request(val["uploadUrl"], data=f.read(), method="PUT",
-                                     headers={"Authorization": f"Bearer {token()}"})
+                                     headers={"Authorization": f"Bearer {token()}", "Content-Type": "application/octet-stream"})
     with urllib.request.urlopen(req) as r:
         if r.status not in (200, 201):
             raise SystemExit(f"La subida de la imagen respondió {r.status}")
