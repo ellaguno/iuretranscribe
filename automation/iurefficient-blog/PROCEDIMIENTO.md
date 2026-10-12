@@ -127,22 +127,47 @@ qué funciones mostrar). Para añadir temas, agrégalos al final de su sector en
 
 ---
 
-# LinkedIn — un post por cada artículo de mejores prácticas
+# LinkedIn — dos posts por semana (martes y jueves)
 
-Sólo para los artículos de **mejores prácticas** (nunca los de versiones), el mismo día que se
-publican. Se publica en el perfil personal de Eduardo con `linkedin.py` (token en
-`LINKEDIN_ACCESS_TOKEN`, permisos `openid`, `profile` y `w_member_social`; caduca cada 60 días).
+Sólo para los artículos de **mejores prácticas** (nunca los de versiones). Los artículos siguen
+saliendo cada 2 días, pero **LinkedIn se publica únicamente los martes y los jueves**, en el
+perfil personal de Eduardo, con `linkedin.py` (token en `LINKEDIN_ACCESS_TOKEN`, permisos
+`openid`, `profile` y `w_member_social`; caduca cada 60 días).
 
-1. **Escribir el post** siguiendo `VOZ_LINKEDIN.md` al pie de la letra (léelo completo cada vez).
-   Guardarlo como JSON: `{"text": …, "url": <URL del artículo en español>, "title": <título del
-   artículo>, "description": <una frase>, "image_url": <URL de la imagen destacada publicada>}`.
+**Por qué martes y jueves por la mañana:** los estudios públicos de Buffer, Hootsuite y Sprout
+Social coinciden en que entre semana (martes a jueves) se obtiene más interacción en LinkedIn que
+el lunes y el viernes, con el mejor tramo a media mañana. Para una audiencia profesional en México
+se eligió **8:30 h (hora de Ciudad de México)**, cuando la gente abre LinkedIn antes de arrancar el
+día. Son promedios generales, no datos de la audiencia de Eduardo: tras 4–6 semanas conviene
+revisar en LinkedIn (Analytics del perfil) qué posts rindieron y ajustar día u hora aquí.
+
+**Cola de posts:**
+
+1. Cuando se publica un artículo de mejores prácticas, **escribir su post ese mismo día** y
+   guardarlo como `linkedin_posts/AAAA-MM-DD-<slug>.json` con `"estado": "pendiente"`.
+   No publicarlo todavía (salvo que hoy sea martes o jueves y la cola esté vacía; ver paso 3).
+2. Calcular el día de la semana en hora de Ciudad de México (`TZ=America/Mexico_City date +%u`:
+   2 = martes, 4 = jueves). **Si hoy no es martes ni jueves, no se publica nada en LinkedIn.**
+3. Si hoy es martes o jueves, publicar **un solo post: el pendiente más antiguo** de la cola
+   (el del artículo más viejo todavía sin post). Tras publicarlo, cambiar su `"estado"` a
+   `"publicado"` y anotar `"urn"` y `"fecha"`. Si no hay pendientes, no publicar.
+4. Si la cola supera 4 pendientes, decirlo en el resumen (los artículos van más rápido que los
+   posts) para decidir si se espacian los artículos.
+5. La rutina debe dispararse hacia las **8:30 h CDMX** para que el post salga a esa hora
+   (`linkedin.py` publica al instante; no programa).
+
+**Redacción y envío:**
+
+1. Seguir `VOZ_LINKEDIN.md` al pie de la letra (leerlo completo cada vez). JSON del post:
+   `{"text": …, "url": <URL del artículo en español>, "title": <título del artículo>,
+   "description": <una frase>, "image_url": <URL de la imagen destacada publicada>, "estado": …}`.
 2. **Revisar en seco**: `python3 linkedin.py post post.json --dry-run`.
 3. **Modo revisión (hasta el 13 de octubre de 2026 inclusive): NO publicar.** Poner el texto
    completo del post en el resumen final y pedir a Eduardo que responda «publícalo» (o sus
    cambios) en esta misma sesión. Sólo cuando lo pida: aplicar los cambios y publicar con
    `python3 linkedin.py post post.json`, una sola vez.
-4. **Modo directo (desde el 14 de octubre de 2026)**: publicar con `linkedin.py post` y poner en el
-   resumen el texto y el enlace del post.
+4. **Modo directo (desde el 14 de octubre de 2026)**: en martes o jueves, publicar con
+   `linkedin.py post` y poner en el resumen el texto y el enlace del post.
 5. Si LinkedIn responde 401, el token caducó: no reintentar y avisar en el resumen que hay que
    renovarlo (Token generator de LinkedIn Developers, app Iurefficient).
 6. Nunca publicar dos veces el mismo post: si la respuesta fue 201 o trae un `urn`, ya está.
@@ -169,6 +194,6 @@ días). Se siguen las mismas tres partes (artículo ES/EN, imagen, LinkedIn) con
    la última versión publicada para descargar. Sin lenguaje de folleto.
 3. **Pantallas**: usar las capturas del propio repo de la app (README/`docs/media`), miradas y
    recortadas igual que las de Iurefficient; si no hay, publicar sin pantalla.
-4. **LinkedIn**: voz de `VOZ_LINKEDIN.md`. Estas apps son de Eduardo, así que se pueden presentar
+4. **LinkedIn**: voz de `VOZ_LINKEDIN.md`; entra en la misma cola de martes y jueves. Estas apps son de Eduardo, así que se pueden presentar
    como «algo que construí/uso», sin inventar anécdotas. Mismo modo revisión hasta el 13-oct-2026.
 5. Si todos los temas de `apps` se agotaron, decirlo en el resumen para añadir más al final del sector.
