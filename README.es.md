@@ -223,6 +223,12 @@ Code, o la salida de `IureTranscribe --mcp-config` en su configuración.
 Las grabaciones se guardan como WAV mono de 16 kHz en `Música/IureTranscribe` (configurable) y,
 si así se indica, se agregan a la cola y se transcriben solas.
 
+Otras apps (por ejemplo IureVoz) pueden iniciar y detener la grabación en la ventana abierta con
+enlaces: `iuretranscribe://record/start?participants=Ana,Luis&place=…&notes=…` (todos los
+parámetros son opcionales y llenan los datos de la reunión) e `iuretranscribe://record/stop`,
+que guarda y sigue el mismo flujo que el botón Detener. `iuretranscribe://record` solo abre la
+vista de grabación.
+
 ## Parte de la suite Iurefficient
 
 | App | Qué hace |

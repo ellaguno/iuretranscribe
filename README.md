@@ -224,6 +224,11 @@ Code, or the output of `IureTranscribe --mcp-config` in their configuration.
 Recordings are saved as 16 kHz mono WAV in `Music/IureTranscribe` (configurable) and, if so
 configured, are added to the queue and transcribed automatically.
 
+Other apps (for example IureVoz) can start and stop recording in the open window with links:
+`iuretranscribe://record/start?participants=Ana,Luis&place=…&notes=…` (all parameters are
+optional and fill in the meeting details) and `iuretranscribe://record/stop`, which saves and
+follows the same flow as the Stop button. `iuretranscribe://record` only opens the recording view.
+
 ## Part of the Iurefficient suite
 
 | App | What it does |

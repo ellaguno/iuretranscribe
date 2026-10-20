@@ -241,8 +241,12 @@ async function handleLaunchArgsNow(args: string[]): Promise<void> {
       } catch {
         continue;
       }
-      const action = (u.host || u.pathname.replace(/^\/+/, "")).replace(/\/+$/, "").toLowerCase();
-      if (action === "record" || action === "grabar") app.view = "record";
+      // «iuretranscribe://record/start?…» o «iuretranscribe:record/start»: acción y subacción
+      const [action = "", sub = ""] = (u.host + u.pathname).replace(/^\/+|\/+$/g, "").toLowerCase().split("/");
+      if ((action === "record" || action === "grabar") && sub) {
+        app.view = "record";
+        await recordFromLink(sub, u.searchParams);
+      } else if (action === "record" || action === "grabar") app.view = "record";
       else if (action === "settings" || action === "ajustes") app.view = "settings";
       else if (action === "models" || action === "modelos") app.view = "models";
       else {
@@ -264,6 +268,24 @@ async function handleLaunchArgsNow(args: string[]): Promise<void> {
     const added = await addFiles(paths);
     // Quien abre con IureTranscribe quiere transcribir: arranca la cola si está libre.
     if (added.length && !app.running) void startQueue();
+  }
+}
+
+/** Acciones de grabación por enlace: `start`/`iniciar` (con `participants`, `place`, `notes` opcionales) y `stop`/`detener`. */
+async function recordFromLink(sub: string, q: URLSearchParams): Promise<void> {
+  // al abrir en frío por el enlace, la configuración puede no haber cargado todavía
+  for (let i = 0; i < 40 && !app.settings; i++) await new Promise((r) => setTimeout(r, 100));
+  if (sub === "start" || sub === "iniciar") {
+    if (app.recording.active) return;
+    const meta = { ...app.pendingMeta };
+    const people = q.getAll("participants").flatMap((p) => p.split(",")).map((p) => p.trim()).filter(Boolean);
+    if (people.length) meta.participants = people.join("\n");
+    if (q.get("place")) meta.place = q.get("place")!;
+    if (q.get("notes")) meta.notes = q.get("notes")!;
+    app.pendingMeta = meta;
+    await startRecording();
+  } else if (sub === "stop" || sub === "detener") {
+    await stopRecording();
   }
 }
 
