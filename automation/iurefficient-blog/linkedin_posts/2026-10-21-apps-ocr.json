@@ -1,0 +1,10 @@
+{
+ "text": "Casi todos los despachos tienen una carpeta de PDF que en realidad son fotos: el contrato que escaneó la recepción, el expediente que llegó de otra oficina. Se ven bien, pero no se buscan ni se puede copiar un párrafo.\n\nPersonalmente creo que el problema de fondo es que, cuando el documento es confidencial, subirlo a un servicio en la nube para «reconocerlo» no siempre es opción. Por eso armé IureOCR, una app de escritorio que reconoce el texto en tu propia computadora con Tesseract.\n\nLo que me parece útil:\n\n• El reconocimiento es local: ni el archivo ni el texto salen de tu equipo.\n• El PDF queda igual al original, con una capa de texto invisible encima. En un expediente cuenta lo que firmó la contraparte, no una retranscripción.\n• Puedes girar, quitar o reordenar páginas antes de procesar.\n• Puedes testar áreas, y el resultado se verifica antes de guardarse.\n• Si usas Iurefficient, lo guardas directo en el proyecto.\n\nPara quién no es: los instaladores aún no están firmados, y en macOS hay que instalar Tesseract aparte.\n\n¿Qué hacen hoy con los escaneos de sus expedientes?\n\n#OCR #GestiónDocumental",
+ "url": "https://iurefficient.com/articulos/apps-iure-ocr-local-escaneos-buscables",
+ "title": "De escaneo a PDF con texto buscable, en tu propio equipo",
+ "description": "IureOCR reconoce el texto en tu computadora y deja un PDF idéntico al original, pero buscable.",
+ "image_url": "https://iurefficient.com/uploads/2026/10/hero-ocr-f026b.png",
+ "estado": "publicado",
+ "urn": "urn:li:share:7519034651773034496",
+ "fecha": "2026-10-22"
+}
