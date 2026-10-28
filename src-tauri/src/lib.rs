@@ -9,6 +9,7 @@ mod settings;
 mod subtitles;
 mod transcribe;
 mod vocab;
+mod wav_sink;
 
 use iurefficient_connect::{agents, api, lang, rest::{Login, Session, SessionExport}, secrets, tr, webdav::{self, WebDav}, Account};
 use models::{Downloads, ModelInfo};

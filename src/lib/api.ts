@@ -331,6 +331,8 @@ export interface StartRecordingInfo {
 export interface RecordingResult {
   path: string;
   durationSecs: number;
+  /** Lo que salió mal sin perder la grabación (p. ej. disco lleno un momento). */
+  warning: string | null;
 }
 
 /** Estado de IureTranscribe en un asistente con servidor MCP local. */

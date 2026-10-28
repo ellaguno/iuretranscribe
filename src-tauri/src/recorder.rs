@@ -8,6 +8,7 @@
 use crate::audio::TARGET_RATE;
 use crate::subtitles::Segment;
 use crate::transcribe::{Engine, EngineEvent, EventSink, Options as EngineOptions};
+use crate::wav_sink::WavSink;
 use anyhow::{anyhow, Result};
 use iurefficient_connect::tr;
 use serde::Serialize;
@@ -85,6 +86,8 @@ pub struct RecordingStatus {
 pub struct RecordingResult {
     pub path: String,
     pub duration_secs: f64,
+    /// Lo que salió mal sin perder la grabación (p. ej. disco lleno un momento).
+    pub warning: Option<String>,
 }
 
 enum Msg {
@@ -97,7 +100,7 @@ struct Active {
     started: Instant,
     path: PathBuf,
     sys_track: Option<PathBuf>,
-    mixer: Option<JoinHandle<Result<u64>>>,
+    mixer: Option<JoinHandle<MixerResult>>,
     workers: Vec<JoinHandle<()>>,
     children: Arc<Mutex<Vec<std::process::Child>>>,
     live_worker: Option<JoinHandle<()>>,
@@ -205,11 +208,11 @@ impl Recorder {
         for w in active.workers.drain(..) {
             let _ = w.join();
         }
-        let samples = active
+        let (samples, warning) = active
             .mixer
             .take()
             .map(|m| m.join().unwrap_or_else(|_| Err(anyhow!(tr!("the mixer failed", "el mezclador falló")))))
-            .unwrap_or(Ok(0))?;
+            .unwrap_or(Ok((0, None)))?;
         // El mezclador ya cerró el canal en vivo; espera a que transcriba lo pendiente.
         if let Some(w) = active.live_worker.take() {
             let _ = w.join();
@@ -226,7 +229,7 @@ impl Recorder {
             let detail = self.last_error.lock().unwrap().clone().unwrap_or_default();
             return Err(anyhow!(tr!("The recording captured no audio. {detail}", "La grabación no captó audio. {detail}")));
         }
-        Ok(RecordingResult { path: active.path.to_string_lossy().into_owned(), duration_secs: samples as f64 / TARGET_RATE as f64 })
+        Ok(RecordingResult { path: active.path.to_string_lossy().into_owned(), duration_secs: samples as f64 / TARGET_RATE as f64, warning })
     }
 
     pub fn status(&self) -> RecordingStatus {
@@ -248,8 +251,12 @@ impl Recorder {
     }
 }
 
+/// Muestras escritas y fallas de escritura sin resolver.
+type MixerResult = Result<(u64, Option<String>)>;
+
 /// Mezcla las fuentes (ya en mono 16 kHz) y escribe el WAV; con `sys_track`, también
-/// el canal del sistema solo, muestra a muestra con la mezcla. Devuelve muestras escritas.
+/// el canal del sistema solo, muestra a muestra con la mezcla. Devuelve las muestras
+/// escritas y, si las hubo, las fallas de escritura que no se pudieron resolver.
 #[allow(clippy::too_many_arguments)]
 fn mixer(
     rx: Receiver<Msg>,
@@ -261,16 +268,16 @@ fn mixer(
     err_slot: Arc<Mutex<Option<String>>>,
     live_tx: Option<mpsc::Sender<LiveChunk>>,
     split: bool,
-) -> Result<u64> {
-    let spec = hound::WavSpec { channels: 1, sample_rate: TARGET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| anyhow!(tr!("Could not create {}: {e}", "No se pudo crear {}: {e}", path.display())))?;
+) -> MixerResult {
+    let mut writer = WavSink::create(path).map_err(|e| anyhow!(tr!("Could not create {}: {e}", "No se pudo crear {}: {e}", path.display())))?;
     // Si no se puede crear el canal del sistema se graba igual: sólo se pierde separar voces.
     let mut sys_writer = sys_track.and_then(|p| {
-        hound::WavWriter::create(p, spec).map_err(|e| log::warn!("no se pudo crear el canal del sistema {}: {e}", p.display())).ok()
+        WavSink::create(p).map_err(|e| log::warn!("no se pudo crear el canal del sistema {}: {e}", p.display())).ok()
     });
+    // Aviso de escritura fallida que se muestra mientras dure el problema.
+    let mut write_err: Option<String> = None;
     let mut queues: [VecDeque<f32>; 2] = [VecDeque::new(), VecDeque::new()];
     let mut alive = sources;
-    let mut written = 0u64;
     let to_i16 = |s: f32| (s.clamp(-1.0, 1.0) * 32767.0) as i16;
     let stall_limit = TARGET_RATE as usize * 2; // 2 s sin datos de la otra fuente → no esperar más
     // Audio para la transcripción en vivo: mezcla (índice 2) o por fuente (0 y 1).
@@ -280,11 +287,10 @@ fn mixer(
         ($a:expr, $b:expr) => {{
             let a: f32 = $a;
             let b: f32 = $b;
-            writer.write_sample(to_i16(a + b))?;
+            writer.push(to_i16(a + b));
             if let Some(w) = sys_writer.as_mut() {
-                w.write_sample(to_i16(b))?;
+                w.push(to_i16(b));
             }
-            written += 1;
             if live_tx.is_some() {
                 if split {
                     live_bufs[MIC].push(a);
@@ -298,11 +304,10 @@ fn mixer(
     macro_rules! put_one {
         ($i:expr, $s:expr) => {{
             let v: f32 = $s;
-            writer.write_sample(to_i16(v))?;
+            writer.push(to_i16(v));
             if let Some(w) = sys_writer.as_mut() {
-                w.write_sample(if $i == SYS { to_i16(v) } else { 0 })?;
+                w.push(if $i == SYS { to_i16(v) } else { 0 });
             }
-            written += 1;
             if live_tx.is_some() {
                 if split {
                     live_bufs[$i].push(v);
@@ -365,6 +370,29 @@ fn mixer(
                 }
             }
         }
+        let res = writer.flush();
+        let res = res.and(sys_writer.as_mut().map_or(Ok(()), WavSink::flush));
+        match res {
+            Err(e) if write_err.is_none() => {
+                log::error!("no se pudo escribir la grabación {}: {e}", path.display());
+                let msg = tr!(
+                    "Could not write the recording ({e}). Is the disk full? The audio is kept in memory (up to 1 hour) and will be saved as soon as there is space.",
+                    "No se pudo escribir la grabación ({e}). ¿Se llenó el disco? El audio se conserva en memoria (hasta 1 hora) y se guardará en cuanto haya espacio."
+                );
+                *err_slot.lock().unwrap() = Some(msg.clone());
+                write_err = Some(msg);
+            }
+            Ok(()) => {
+                if let Some(msg) = write_err.take() {
+                    log::info!("se recuperó la escritura de la grabación {}", path.display());
+                    let mut slot = err_slot.lock().unwrap();
+                    if slot.as_deref() == Some(msg.as_str()) {
+                        *slot = None;
+                    }
+                }
+            }
+            Err(_) => {}
+        }
     }
     // Vacía lo que quede, mezclando con silencio.
     let n = queues[MIC].len().max(queues[SYS].len());
@@ -379,11 +407,27 @@ fn mixer(
         }
     }
     drop(live_tx); // cierra el canal: el hilo en vivo transcribe lo pendiente y termina
-    writer.finalize()?;
+    let mut problems = Vec::new();
     if let Some(w) = sys_writer {
-        w.finalize()?;
+        // El canal del sistema sólo sirve para separar voces: si falla, no se rescata aparte.
+        if let (_, Err(e)) = w.finish(None) {
+            log::warn!("no se pudo cerrar el canal del sistema: {e}");
+        }
     }
-    Ok(written)
+    let dropped = writer.dropped_secs();
+    let (samples, finished) = writer.finish(Some(path));
+    if let Err(e) = finished {
+        log::error!("no se pudo cerrar la grabación {}: {e}", path.display());
+        problems.push(e);
+    }
+    if dropped > 0.0 {
+        problems.push(tr!(
+            "{:.0} s of audio were lost because the disk stayed full for more than an hour.",
+            "Se perdieron {:.0} s de audio porque el disco siguió lleno más de una hora.",
+            dropped
+        ));
+    }
+    Ok((samples, (!problems.is_empty()).then(|| problems.join(" "))))
 }
 
 // ---------------------------------------------------------------------------
@@ -817,7 +861,6 @@ fn spawn_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// Alimenta el hilo en vivo con un archivo de voz y comprueba que emite segmentos
     /// ordenados. Requiere IURE_TEST_MODEL e IURE_TEST_AUDIO.
     #[test]

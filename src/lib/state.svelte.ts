@@ -578,7 +578,10 @@ export async function loadDevices() {
 
 async function pollRecording() {
   try {
+    const prevError = app.recording.error;
     app.recording = await api.recordingStatus();
+    // Avisa aunque no estés en la vista de grabación (p. ej. el disco se llenó).
+    if (app.recording.active && app.recording.error && app.recording.error !== prevError) toast(app.recording.error, "error", 12000);
   } catch {
     /* ignorar */
   }
@@ -658,6 +661,7 @@ export async function stopRecording() {
     }
     app.pendingMeta = emptyMeta();
     toast(t("record.saved", { secs: Math.round(res.durationSecs) }), "success");
+    if (res.warning) toast(res.warning, "error", 20000);
     const s = app.settings;
     if (job && wasLive && live.length && s?.liveIsFinal) {
       // La transcripción en vivo es el resultado final: se escriben las salidas sin repetir.
