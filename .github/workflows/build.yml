@@ -194,6 +194,62 @@ jobs:
           Copy-Item src-tauri/diarizer/target/release/iuretranscribe-diarize.exe "src-tauri/binaries/iuretranscribe-diarize-$triple.exe"
           Get-ChildItem src-tauri/binaries
 
+      # --- Firma de Apple (Developer ID) -----------------------------------------------
+      # El certificado va a un keychain temporal; Tauri firma el .app y el sidecar con
+      # hardened runtime (APPLE_SIGNING_IDENTITY). En etiquetas, además, Tauri notariza y
+      # engrapa el .app antes de armar el .dmg y el .app.tar.gz del actualizador
+      # (APPLE_API_*). Secretos: los de iureapps (scripts/apple-secrets.sh con
+      # REPO=ellaguno/iuretranscribe). Sin ellos sale sin firmar, como antes.
+      - name: Firma de Apple (keychain temporal)
+        id: apple
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEVELOPER_ID_P12_BASE64" ] || [ -z "$DEVELOPER_ID_PASSWORD" ] || [ -z "$KEYCHAIN_PASSWORD" ]; then
+            echo "::warning::Sin los secretos de Developer ID: el .app y el .dmg salen sin firmar."
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/iuretranscribe-firma.keychain-db"
+          P12="$RUNNER_TEMP/devid.p12"
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$P12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KC"
+          security import "$P12" -k "$KC" -P "$DEVELOPER_ID_PASSWORD" -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$P12"
+          # Intermedia de Developer ID (G2): sin ella la cadena puede no validar en el runner.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/g2.cer"
+          security import "$RUNNER_TEMP/g2.cer" -k "$KC" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          IDENTITY="$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application: .*(\('"$APPLE_TEAM_ID"'\))\)".*/\1/p' | head -n1)"
+          if [ -z "$IDENTITY" ]; then
+            security find-identity -v -p codesigning "$KC"
+            echo "::error::El .p12 no trae una identidad «Developer ID Application» del equipo $APPLE_TEAM_ID."
+            exit 1
+          fi
+          echo "Identidad: $IDENTITY"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "keychain=$KC" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_PRIVATE_KEY" ]; then
+            KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+            printf '%s\n' "$ASC_PRIVATE_KEY" > "$KEY"
+            chmod 600 "$KEY"
+            { echo "APPLE_API_KEY=$ASC_KEY_ID"; echo "APPLE_API_ISSUER=$ASC_ISSUER_ID"; echo "APPLE_API_KEY_PATH=$KEY"; } >> "$GITHUB_ENV"
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Sólo se firma; la notarización va en las etiquetas."
+          fi
+
       - name: Compilar y empaquetar
         uses: tauri-apps/tauri-action@v0
         env:
@@ -282,6 +338,43 @@ jobs:
             exit 1
           fi
           echo "$n instaladores firmados"
+
+      # El .app ya viene notarizado y engrapado por Tauri; se notariza también el .dmg
+      # (para que Gatekeeper lo acepte al abrirlo sin conexión) y se comprueba todo como
+      # lo haría un Mac. El .app.tar.gz del actualizador no cambia, así que su .sig vale.
+      - name: Notarizar el .dmg y comprobar Gatekeeper
+        if: steps.apple.outputs.notarize == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="$(find "${CARGO_TARGET_DIR:-src-tauri/target}" -type d -path '*/release/bundle' | head -1)"
+          APP="$BUNDLE/macos/IureTranscribe.app"
+          DMG="$(find "$BUNDLE/dmg" -name '*.dmg' | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -E 'Authority=Developer ID Application|flags=.*runtime'
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG" 2>/dev/null || true
+          NOTARY=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+          OUT="$(xcrun notarytool submit "$DMG" "${NOTARY[@]}" --wait --timeout 150m --output-format json || true)"
+          echo "$OUT"
+          field() { printf '%s' "$OUT" | python3 -c 'import json,sys
+          try: print(json.load(sys.stdin).get(sys.argv[1], ""))
+          except Exception: print("")' "$1"; }
+          STATUS="$(field status)"; ID="$(field id)"
+          if [ "$STATUS" != Accepted ]; then
+            if [ -n "$ID" ]; then xcrun notarytool log "$ID" "${NOTARY[@]}" || true; fi
+            echo "::error::La notarización de $DMG no quedó aceptada (estado «${STATUS:-sin respuesta}», id ${ID:-ninguno})."
+            exit 1
+          fi
+          xcrun stapler staple -v "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
+
+      - name: Borrar el keychain temporal
+        if: always() && steps.apple.outputs.keychain != ''
+        shell: bash
+        run: security delete-keychain "${{ steps.apple.outputs.keychain }}" || true
 
       # Renombra los instaladores con la variante para que no choquen entre sí en la
       # release. GitHub lista los assets por nombre (orden ASCII), así que el prefijo

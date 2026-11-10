@@ -11,5 +11,7 @@ Instaladores generados automáticamente por GitHub Actions. Elige el que corresp
 | `*_3-linux-x64-vulkan.*` | Linux | AMD, Intel o NVIDIA vía Vulkan (ligero) |
 | `*_3-linux-x64-cuda.deb` | Linux | NVIDIA con CUDA 12 (incluye el runtime, pesa más) |
 
+Los .dmg de macOS van firmados (Developer ID) y notarizados por Apple: se abren sin advertencias de Gatekeeper.
+
 Las variantes CUDA requieren driver NVIDIA ≥ 525. Las variantes Vulkan requieren drivers gráficos actualizados.
 Los modelos de Whisper se descargan desde la propia app la primera vez.
