@@ -695,6 +695,11 @@ async fn stop_recording(state: State<'_, AppState>) -> Result<recorder::Recordin
 }
 
 #[tauri::command]
+fn pause_recording(state: State<'_, AppState>, paused: bool) -> Result<(), String> {
+    state.recorder.set_paused(paused).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 fn recording_status(state: State<'_, AppState>) -> recorder::RecordingStatus {
     state.recorder.status()
 }
@@ -1640,6 +1645,7 @@ pub fn run() {
             list_audio_devices,
             start_recording,
             stop_recording,
+            pause_recording,
             recording_status,
             open_path,
             reveal_path,

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api";
-  import { app, loadDevices, saveSettings, selectedModel, startRecording, stopRecording, toast } from "../lib/state.svelte";
+  import { app, loadDevices, refreshPendingDate, saveSettings, selectedModel, setRecordingPaused, startRecording, stopRecording, toast } from "../lib/state.svelte";
   import { fmtDuration, fmtTimestamp } from "../lib/format";
   import Icon from "./Icon.svelte";
   import MetaForm from "./MetaForm.svelte";
@@ -38,6 +38,7 @@
 
   onMount(() => {
     if (!app.devices) loadDevices();
+    if (!rec.active) refreshPendingDate();
   });
 
   async function pickDir() {
@@ -60,7 +61,7 @@
 </header>
 
 <div class="content scroll">
-  <div class="card rec" class:live={rec.active}>
+  <div class="card rec" class:live={rec.active && !rec.paused} class:paused={rec.active && rec.paused}>
     <div class="rec-main">
       <button class="rec-btn" class:stop={rec.active} disabled={!canRecord && !rec.active} onclick={() => (rec.active ? stopRecording() : startRecording())} aria-label={rec.active ? t("record.stop") : t("record.record")}>
         {#if app.recordingBusy}
@@ -71,12 +72,17 @@
           <Icon name="dot" size={30} />
         {/if}
       </button>
+      {#if rec.active}
+        <button class="pause-btn" class:paused={rec.paused} disabled={app.recordingBusy} onclick={() => setRecordingPaused(!rec.paused)} aria-label={rec.paused ? t("record.resume") : t("record.pause")} title={rec.paused ? t("record.resume") : t("record.pause")}>
+          <Icon name={rec.paused ? "dot" : "pausefill"} size={22} />
+        </button>
+      {/if}
       <div class="rec-info">
         {#if rec.active}
-          <div class="timer">{fmtDuration(rec.elapsedSecs)}</div>
+          <div class="timer" class:paused={rec.paused}>{fmtDuration(rec.elapsedSecs)}</div>
           <div class="hint">
-            {s.autoTranscribeRecording ? t("record.recordingTranscribe") : t("record.recording")}.
-            {#if rec.live}<span class="livetag"><Icon name="zap" size={12} /> {t("record.live")}{rec.livePendingSecs > 3 ? t("record.delay", { secs: Math.round(rec.livePendingSecs) }) : ""}</span>{/if}
+            {rec.paused ? t("record.paused") : s.autoTranscribeRecording ? t("record.recordingTranscribe") : t("record.recording")}.
+            {#if rec.live && !rec.paused}<span class="livetag"><Icon name="zap" size={12} /> {t("record.live")}{rec.livePendingSecs > 3 ? t("record.delay", { secs: Math.round(rec.livePendingSecs) }) : ""}</span>{/if}
           </div>
         {:else}
           <div class="timer idle">00:00</div>
@@ -228,6 +234,12 @@
   .rec-btn:hover:not(:disabled) { filter: brightness(1.08); }
   .rec-btn:active:not(:disabled) { transform: scale(0.96); }
   .rec-btn.stop { animation: pulse 1.6s ease-in-out infinite; }
+  .rec.paused .rec-btn.stop { animation: none; }
+  .pause-btn { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--text); flex-shrink: 0; margin-left: -8px; transition: filter 0.15s; }
+  .pause-btn:hover:not(:disabled) { filter: brightness(0.95); }
+  .pause-btn.paused { background: var(--accent); color: var(--accent-text); }
+  .timer.paused { color: var(--muted); animation: blink 1.2s steps(2, start) infinite; }
+  @keyframes blink { to { visibility: hidden; } }
   @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 16px transparent; } }
   .spin { display: inline-flex; animation: spin 1s linear infinite; }
   .timer { font-size: 38px; font-weight: 650; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }

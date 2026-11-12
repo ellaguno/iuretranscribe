@@ -38,6 +38,7 @@
     cloud: "M17.5 19a4.5 4.5 0 0 0 .4-9A7 7 0 0 0 4.3 12.6 3.5 3.5 0 0 0 6 19z",
     dot: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z",
     stopfill: "M7 7h10v10H7z",
+    pausefill: "M7 5h3.5v14H7zM13.5 5H17v14h-3.5z",
     speaker: "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14",
     edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
     drive: "M22 12H2M5.5 5h13l3.5 7v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5zM6 16h.01M10 16h.01",
@@ -61,5 +62,5 @@
   aria-hidden="true"
   style="flex-shrink:0"
 >
-  <path d={paths[name] ?? paths.info} fill={name === "dot" || name === "stopfill" ? "currentColor" : "none"} />
+  <path d={paths[name] ?? paths.info} fill={name === "dot" || name === "stopfill" || name === "pausefill" ? "currentColor" : "none"} />
 </svg>

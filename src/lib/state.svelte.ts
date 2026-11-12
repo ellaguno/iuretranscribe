@@ -55,13 +55,44 @@ export function todayLabel(): string {
   }
 }
 
+/** Fecha y hora actuales, p. ej. «12 de noviembre de 2026, 10:32». */
+export function nowLabel(): string {
+  try {
+    return new Date().toLocaleString(locale(), { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return new Date().toISOString().slice(0, 16).replace("T", " ");
+  }
+}
+
 export function emptyMeta(): JobMeta {
   return { participants: "", date: todayLabel(), place: "", notes: "" };
 }
 
+/** Última fecha sugerida automáticamente en la grabación (para no pisar una que escribió el usuario). */
+let autoPendingDate = "";
+
+/** Detalles en blanco para la próxima grabación. */
+function freshPendingMeta(): JobMeta {
+  const m = emptyMeta();
+  autoPendingDate = m.date;
+  return m;
+}
+
+/**
+ * Pone la fecha de hoy (y la hora, al empezar a grabar) en los detalles pendientes si está
+ * vacía o si sigue siendo la sugerida (la app pudo quedarse abierta desde ayer, o cambió el idioma).
+ */
+export function refreshPendingDate(withTime = false) {
+  const d = app.pendingMeta.date.trim();
+  if (!d || d === autoPendingDate) {
+    autoPendingDate = withTime ? nowLabel() : todayLabel();
+    app.pendingMeta.date = autoPendingDate;
+  }
+}
+
 /** ¿El usuario capturó algo más allá de la fecha sugerida? */
 export function metaFilledByUser(m: JobMeta): boolean {
-  return !!(m.place.trim() || m.participants.trim() || m.notes.trim() || (m.date.trim() && m.date.trim() !== todayLabel()));
+  return !!(m.place.trim() || m.participants.trim() || m.notes.trim() || (m.date.trim() && !m.date.trim().startsWith(todayLabel())));
 }
 
 export function metaToContext(m: JobMeta): string {
@@ -161,12 +192,12 @@ export const app = $state({
   toasts: [] as Toast[],
   now: Date.now(),
   devices: null as DeviceList | null,
-  recording: { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false } as RecordingStatus,
+  recording: { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false, paused: false } as RecordingStatus,
   /** Segmentos transcritos en vivo durante la grabación actual. */
   liveSegments: [] as Segment[],
   recordingBusy: false,
   /** Detalles capturados durante la grabación; se adjuntan al trabajo al detenerla. */
-  pendingMeta: { participants: "", date: "", place: "", notes: "" } as JobMeta,
+  pendingMeta: freshPendingMeta(),
   /** Sesión REST con Iurefficient (null = no comprobada todavía). */
   iureSession: null as IureSessionStatus | null,
   /** Versión nueva disponible en GitHub, si se detectó. */
@@ -271,7 +302,7 @@ async function handleLaunchArgsNow(args: string[]): Promise<void> {
   }
 }
 
-/** Acciones de grabación por enlace: `start`/`iniciar` (con `participants`, `place`, `notes` opcionales) y `stop`/`detener`. */
+/** Acciones de grabación por enlace: `start`/`iniciar` (con `participants`, `place`, `notes` opcionales) y `stop`/`detener`, `pause`/`pausar` y `resume`/`reanudar`. */
 async function recordFromLink(sub: string, q: URLSearchParams): Promise<void> {
   // al abrir en frío por el enlace, la configuración puede no haber cargado todavía
   for (let i = 0; i < 40 && !app.settings; i++) await new Promise((r) => setTimeout(r, 100));
@@ -286,6 +317,10 @@ async function recordFromLink(sub: string, q: URLSearchParams): Promise<void> {
     await startRecording();
   } else if (sub === "stop" || sub === "detener") {
     await stopRecording();
+  } else if (sub === "pause" || sub === "pausar") {
+    await setRecordingPaused(true);
+  } else if (sub === "resume" || sub === "reanudar") {
+    await setRecordingPaused(false);
   }
 }
 
@@ -627,6 +662,7 @@ export async function startRecording() {
   if (app.recordingBusy || app.recording.active) return;
   app.recordingBusy = true;
   app.liveSegments = [];
+  refreshPendingDate(true);
   try {
     const split = !!app.settings?.speakerSplit && !!app.settings?.recordMic && !!app.settings?.recordSystem;
     const info = await api.startRecording(split ? speakerNames() : null);
@@ -640,6 +676,17 @@ export async function startRecording() {
   }
 }
 
+/** Pausa o reanuda la grabación en curso. */
+export async function setRecordingPaused(paused: boolean) {
+  if (app.recordingBusy || !app.recording.active || app.recording.paused === paused) return;
+  try {
+    await api.pauseRecording(paused);
+    app.recording.paused = paused;
+  } catch (e) {
+    toast(String(e), "error", 6000);
+  }
+}
+
 export async function stopRecording() {
   if (app.recordingBusy || !app.recording.active) return;
   app.recordingBusy = true;
@@ -648,7 +695,7 @@ export async function stopRecording() {
     const recordingStartedAt = Date.now() - app.recording.elapsedSecs * 1000;
     const wasLive = app.recording.live;
     const res = await api.stopRecording();
-    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false, paused: false };
     const [job] = await addFiles([res.path]);
     const live = app.liveSegments.map((s) => ({ ...s }));
     app.liveSegments = [];
@@ -659,7 +706,7 @@ export async function stopRecording() {
       if (app.settings?.recordMic && app.settings?.recordSystem) job.speakerNames = speakerNames(job.meta);
       app.selectedJobId = job.id;
     }
-    app.pendingMeta = emptyMeta();
+    app.pendingMeta = freshPendingMeta();
     toast(t("record.saved", { secs: Math.round(res.durationSecs) }), "success");
     if (res.warning) toast(res.warning, "error", 20000);
     const s = app.settings;
@@ -670,7 +717,7 @@ export async function stopRecording() {
       await startQueue();
     }
   } catch (e) {
-    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false };
+    app.recording = { active: false, elapsedSecs: 0, micLevel: 0, sysLevel: 0, path: null, error: null, livePendingSecs: 0, live: false, paused: false };
     toast(String(e), "error", 9000);
   } finally {
     app.recordingBusy = false;

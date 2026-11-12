@@ -226,8 +226,9 @@ si así se indica, se agregan a la cola y se transcriben solas.
 Otras apps (por ejemplo IureVoz) pueden iniciar y detener la grabación en la ventana abierta con
 enlaces: `iuretranscribe://record/start?participants=Ana,Luis&place=…&notes=…` (todos los
 parámetros son opcionales y llenan los datos de la reunión) e `iuretranscribe://record/stop`,
-que guarda y sigue el mismo flujo que el botón Detener. `iuretranscribe://record` solo abre la
-vista de grabación.
+que guarda y sigue el mismo flujo que el botón Detener. `iuretranscribe://record/pause` y
+`iuretranscribe://record/resume` la pausan y la reanudan (lo que suena en pausa no se graba).
+`iuretranscribe://record` solo abre la vista de grabación.
 
 ## Parte de la suite Iurefficient
 

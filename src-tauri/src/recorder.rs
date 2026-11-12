@@ -79,6 +79,8 @@ pub struct RecordingStatus {
     /// Segundos de audio pendientes de transcribir en vivo (retraso).
     pub live_pending_secs: f32,
     pub live: bool,
+    /// En pausa: el audio que llega se descarta y el tiempo no corre.
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,7 +99,11 @@ enum Msg {
 
 struct Active {
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     started: Instant,
+    /// Tiempo acumulado en pausas ya terminadas, y desde cuándo dura la actual.
+    paused_total: Duration,
+    paused_since: Option<Instant>,
     path: PathBuf,
     sys_track: Option<PathBuf>,
     mixer: Option<JoinHandle<MixerResult>>,
@@ -131,6 +137,7 @@ impl Recorder {
         let path = opts.output_dir.join(name);
 
         let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let children = Arc::new(Mutex::new(Vec::new()));
         let (tx, rx) = mpsc::channel::<Msg>();
         *self.last_error.lock().unwrap() = None;
@@ -185,12 +192,43 @@ impl Recorder {
             let path = path.clone();
             let sys_track = sys_track.clone();
             let stop = stop.clone();
+            let paused = paused.clone();
             let levels = [self.levels[0].clone(), self.levels[1].clone()];
             let err_slot = self.last_error.clone();
-            std::thread::spawn(move || mixer(rx, &path, sys_track.as_deref(), sources, stop, levels, err_slot, live_tx, split))
+            std::thread::spawn(move || mixer(rx, &path, sys_track.as_deref(), sources, stop, paused, levels, err_slot, live_tx, split))
         };
-        *slot = Some(Active { stop, started: Instant::now(), path: path.clone(), sys_track, mixer: Some(mixer), workers, children, live_worker, live: is_live });
+        *slot = Some(Active {
+            stop,
+            paused,
+            started: Instant::now(),
+            paused_total: Duration::ZERO,
+            paused_since: None,
+            path: path.clone(),
+            sys_track,
+            mixer: Some(mixer),
+            workers,
+            children,
+            live_worker,
+            live: is_live,
+        });
         Ok(path)
+    }
+
+    /// Pausa o reanuda la grabación en curso. Las fuentes siguen abiertas (reanudar es
+    /// inmediato); el mezclador descarta lo que llega mientras dure la pausa.
+    pub fn set_paused(&self, pause: bool) -> Result<()> {
+        let mut slot = self.active.lock().unwrap();
+        let a = slot.as_mut().ok_or_else(|| anyhow!(tr!("No recording is in progress", "No hay ninguna grabación en curso")))?;
+        match (pause, a.paused_since) {
+            (true, None) => a.paused_since = Some(Instant::now()),
+            (false, Some(since)) => {
+                a.paused_total += since.elapsed();
+                a.paused_since = None;
+            }
+            _ => return Ok(()),
+        }
+        a.paused.store(pause, Ordering::Relaxed);
+        Ok(())
     }
 
     pub fn stop(&self) -> Result<RecordingResult> {
@@ -238,15 +276,30 @@ impl Recorder {
         match active.as_ref() {
             Some(a) => RecordingStatus {
                 active: true,
-                elapsed_secs: a.started.elapsed().as_secs_f64(),
+                elapsed_secs: a
+                    .started
+                    .elapsed()
+                    .saturating_sub(a.paused_total + a.paused_since.map_or(Duration::ZERO, |t| t.elapsed()))
+                    .as_secs_f64(),
                 mic_level: level(MIC),
                 sys_level: level(SYS),
                 path: Some(a.path.to_string_lossy().into_owned()),
                 error: self.last_error.lock().unwrap().clone(),
                 live_pending_secs: self.live_pending.load(Ordering::Relaxed) as f32 / 10.0,
                 live: a.live,
+                paused: a.paused_since.is_some(),
             },
-            None => RecordingStatus { active: false, elapsed_secs: 0.0, mic_level: 0.0, sys_level: 0.0, path: None, error: None, live_pending_secs: 0.0, live: false },
+            None => RecordingStatus {
+                active: false,
+                elapsed_secs: 0.0,
+                mic_level: 0.0,
+                sys_level: 0.0,
+                path: None,
+                error: None,
+                live_pending_secs: 0.0,
+                live: false,
+                paused: false,
+            },
         }
     }
 }
@@ -264,6 +317,7 @@ fn mixer(
     sys_track: Option<&Path>,
     sources: [bool; 2],
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     levels: [Arc<AtomicU32>; 2],
     err_slot: Arc<Mutex<Option<String>>>,
     live_tx: Option<mpsc::Sender<LiveChunk>>,
@@ -320,6 +374,14 @@ fn mixer(
 
     loop {
         match rx.recv_timeout(Duration::from_millis(150)) {
+            Ok(Msg::Data(i, _)) if paused.load(Ordering::Relaxed) => {
+                levels[i].store(0, Ordering::Relaxed);
+                // Lo que quede en cola (una fracción de segundo esperando a la otra fuente)
+                // se tira para que las dos reanuden alineadas.
+                for q in queues.iter_mut() {
+                    q.clear();
+                }
+            }
             Ok(Msg::Data(i, data)) => {
                 let rms = (data.iter().map(|s| s * s).sum::<f32>() / data.len().max(1) as f32).sqrt();
                 levels[i].store((rms * 6.0).min(1.0).to_bits(), Ordering::Relaxed);

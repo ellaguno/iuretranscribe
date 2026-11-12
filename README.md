@@ -227,7 +227,9 @@ configured, are added to the queue and transcribed automatically.
 Other apps (for example IureVoz) can start and stop recording in the open window with links:
 `iuretranscribe://record/start?participants=Ana,Luis&place=…&notes=…` (all parameters are
 optional and fill in the meeting details) and `iuretranscribe://record/stop`, which saves and
-follows the same flow as the Stop button. `iuretranscribe://record` only opens the recording view.
+follows the same flow as the Stop button. `iuretranscribe://record/pause` and
+`iuretranscribe://record/resume` pause and resume it (paused audio is not recorded).
+`iuretranscribe://record` only opens the recording view.
 
 ## Part of the Iurefficient suite
 

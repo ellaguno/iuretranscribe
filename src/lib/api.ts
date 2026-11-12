@@ -320,6 +320,7 @@ export interface RecordingStatus {
   error: string | null;
   livePendingSecs: number;
   live: boolean;
+  paused: boolean;
 }
 
 export interface StartRecordingInfo {
@@ -442,6 +443,7 @@ export const api = {
   listAudioDevices: () => invoke<DeviceList>("list_audio_devices"),
   startRecording: (speakers: [string, string] | null) => invoke<StartRecordingInfo>("start_recording", { speakers }),
   stopRecording: () => invoke<RecordingResult>("stop_recording"),
+  pauseRecording: (paused: boolean) => invoke<void>("pause_recording", { paused }),
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   systemInfo: () => invoke<SystemInfo>("system_info"),
   /** Idioma efectivo de la interfaz ya resuelto por el backend. */
