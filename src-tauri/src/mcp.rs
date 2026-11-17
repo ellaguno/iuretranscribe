@@ -12,6 +12,11 @@
 //! eso `transcribe_file` espera como mucho `wait_seconds` y, si no ha terminado, devuelve
 //! el `jobId` para seguir con `transcription_status`; el trabajo continúa mientras tanto.
 //!
+//! Grabar (para IureDesk: «grabar la junta» sin abrir esta ventana): `start_recording`,
+//! `recording_status`, `pause_recording` y `stop_recording` usan el mismo grabador que la app,
+//! con sus ajustes (micrófono, audio del sistema, carpeta). La grabación vive en este proceso:
+//! quien la empieza mantiene vivo el cliente MCP hasta detenerla.
+//!
 //! El protocolo lo pone `iurefficient_connect::mcp_server`. El registro va a stderr y a
 //! `iuretranscribe-mcp.log`, nunca a stdout.
 
@@ -67,6 +72,7 @@ struct Server {
     engine: Arc<Engine>,
     jobs: Mutex<HashMap<String, Arc<Job>>>,
     seq: AtomicU64,
+    recorder: crate::recorder::Recorder,
 }
 
 pub fn serve(settings: Settings, paths: Paths) -> i32 {
@@ -76,6 +82,7 @@ pub fn serve(settings: Settings, paths: Paths) -> i32 {
         engine: Arc::new(Engine::default()),
         jobs: Mutex::new(HashMap::new()),
         seq: AtomicU64::new(1),
+        recorder: crate::recorder::Recorder::default(),
     })
 }
 
@@ -111,6 +118,14 @@ impl Handler for Server {
             "audio_info" => self.audio_info(args)?,
             "list_recordings" => self.list_recordings(args)?,
             "transcription_setup" => self.transcription_setup()?,
+            "start_recording" => self.start_recording()?,
+            "recording_status" => serde_json::to_value(self.recorder.status()).map_err(anyhow::Error::from)?,
+            "pause_recording" => {
+                let paused = args.get("paused").and_then(Value::as_bool).unwrap_or(true);
+                self.recorder.set_paused(paused)?;
+                json!({"paused": paused})
+            }
+            "stop_recording" => serde_json::to_value(self.recorder.stop()?).map_err(anyhow::Error::from)?,
             _ => return Err(CallError::Params(format!("unknown tool: {name}"))),
         };
         Ok(Reply::Data(data))
@@ -303,6 +318,36 @@ impl Server {
             "durationSecs": duration.map(|d| d.round()),
             "transcripts": existing_transcripts(&self.settings(), &input),
         }))
+    }
+
+    /// Carpeta de las grabaciones (la de los ajustes o la de omisión).
+    fn recordings_dir(&self) -> PathBuf {
+        self.settings()
+            .recordings_dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.paths.recordings_default.clone())
+    }
+
+    /// Empieza a grabar con los ajustes de la app (sin transcripción en vivo: se transcribe al
+    /// terminar). Error si ya hay una grabación en este proceso.
+    fn start_recording(&self) -> Result<Value> {
+        if self.recorder.status().active {
+            return Err(anyhow!(tr!("A recording is already in progress.", "Ya hay una grabación en curso.")));
+        }
+        let settings = self.settings();
+        let opts = crate::recorder::StartOptions {
+            capture_mic: settings.record_mic,
+            mic_device: settings.mic_device.clone(),
+            capture_system: settings.record_system,
+            output_dir: self.recordings_dir(),
+            live: None,
+        };
+        let path = self.recorder.start(opts)?;
+        log::info!("MCP: grabando en {}", path.display());
+        Ok(json!({"path": path.to_string_lossy(), "active": true}))
     }
 
     fn list_recordings(&self, args: &Value) -> Result<Value> {
@@ -549,6 +594,40 @@ fn tools() -> Value {
             "annotations": read_only,
         },
         {
+            "name": "start_recording",
+            "title": lang::pick("Start recording", "Empezar a grabar"),
+            "description": lang::pick(
+                "Starts recording a meeting (microphone and/or system audio, as set in the app) into the recordings folder. Only one at a time. The recording lives in this process: keep the client open and call stop_recording when done.",
+                "Empieza a grabar una reunión (micrófono y/o audio del sistema, según la app) en la carpeta de grabaciones. Una a la vez. La grabación vive en este proceso: mantén abierto el cliente y llama a stop_recording al terminar."),
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        },
+        {
+            "name": "recording_status",
+            "title": lang::pick("Recording status", "Estado de la grabación"),
+            "description": lang::pick(
+                "Whether it is recording, elapsed seconds (pauses excluded), input levels, paused and the file path.",
+                "Si está grabando, segundos transcurridos (sin las pausas), niveles de entrada, si está en pausa y la ruta del archivo."),
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": read_only,
+        },
+        {
+            "name": "pause_recording",
+            "title": lang::pick("Pause or resume", "Pausar o seguir"),
+            "description": lang::pick("Pauses (paused: true) or resumes (paused: false) the recording.", "Pausa (paused: true) o reanuda (paused: false) la grabación."),
+            "inputSchema": {"type": "object", "properties": {"paused": {"type": "boolean"}}, "required": ["paused"]},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false},
+        },
+        {
+            "name": "stop_recording",
+            "title": lang::pick("Stop recording", "Detener la grabación"),
+            "description": lang::pick(
+                "Stops and saves the recording; returns its path and duration (then transcribe it with transcribe_file).",
+                "Detiene y guarda la grabación; devuelve su ruta y duración (después transcríbela con transcribe_file)."),
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+        },
+        {
             "name": "transcription_setup",
             "title": lang::pick("Transcription settings", "Ajustes de transcripción"),
             "description": lang::pick(
@@ -558,4 +637,28 @@ fn tools() -> Value {
             "annotations": read_only,
         },
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recording_tools_are_published() {
+        let names: Vec<String> = tools()
+            .as_array()
+            .map(|a| a.iter().filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_string)).collect())
+            .unwrap_or_default();
+        for n in ["start_recording", "recording_status", "pause_recording", "stop_recording", "transcribe_file"] {
+            assert!(names.iter().any(|x| x == n), "falta {n}");
+        }
+    }
+
+    #[test]
+    fn pausing_without_a_recording_is_an_error_not_a_panic() {
+        let r = crate::recorder::Recorder::default();
+        assert!(!r.status().active);
+        assert!(r.set_paused(true).is_err());
+        assert!(r.stop().is_err());
+    }
 }
