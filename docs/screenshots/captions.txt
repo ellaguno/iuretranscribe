@@ -1,0 +1,5 @@
+Cola de archivos con la transcripción apareciendo en tiempo real
+Minuta con asistentes, orden del día, acuerdos y compromisos
+Resumen de la reunión, con tema oscuro
+Vocabulario y correcciones automáticas
+Conexión con asistentes de IA
