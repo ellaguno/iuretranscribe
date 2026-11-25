@@ -58,7 +58,7 @@
           </uap:Protocol>
         </uap:Extension>
         <!-- `iuretranscribe` en la terminal y como comando de los clientes MCP
-             (`iuretranscribe --mcp`): la ruta real cambia con cada versión. -->
+             (modo MCP): la ruta real cambia con cada versión. -->
         <uap3:Extension Category="windows.appExecutionAlias" Executable="IureTranscribe.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="iuretranscribe.exe" />
