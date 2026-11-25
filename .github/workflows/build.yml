@@ -339,6 +339,155 @@ jobs:
           fi
           echo "$n instaladores firmados"
 
+      # --- Paquete MSIX para Microsoft Store (sólo la variante Vulkan) -------------------
+      # La Store no deja elegir variante: se publica la de Vulkan (sirve en GPU AMD, Intel y
+      # NVIDIA y, si no hay GPU, cae al procesador). CUDA y CPU siguen sólo en la release.
+      # Se arma con makeappx/makepri del SDK del runner con lo mismo que instala el NSIS
+      # (ejecutable, sidecar de hablantes y modelo Base) más el cargador de Vulkan, para que
+      # la app arranque también en equipos sin controladores de video con Vulkan. Salen dos
+      # artefactos que no van a la release: `msix-store` (sin firmar, para Partner Center) y
+      # `msix-prueba` (firmado con un certificado de prueba, con su .cer).
+      - name: Paquete MSIX (Microsoft Store)
+        if: matrix.name == 'windows-x64-vulkan'
+        shell: pwsh
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:MSIX_IDENTITY_NAME -or -not $env:MSIX_PUBLISHER -or -not $env:MSIX_PUBLISHER_DISPLAY_NAME) {
+            Write-Output "::warning::Faltan las variables MSIX_IDENTITY_NAME, MSIX_PUBLISHER o MSIX_PUBLISHER_DISPLAY_NAME: el .msix lleva una identidad de prueba y Partner Center lo rechazará."
+          }
+          $identity = if ($env:MSIX_IDENTITY_NAME) { $env:MSIX_IDENTITY_NAME } else { 'Iurefficient.IureTranscribe' }
+          $publisher = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { 'CN=Iurefficient' }
+          $display = if ($env:MSIX_PUBLISHER_DISPLAY_NAME) { $env:MSIX_PUBLISHER_DISPLAY_NAME } else { 'Iurefficient' }
+          # La Store no acepta un primer número 0 y exige el cuarto en 0: 0.8.5 → 1.8.5.0
+          # (como Iurefficient Apps e IureProject). Siempre crece; la 1.0.0 será 2.0.0.0.
+          $cargo = (Select-String -Path src-tauri\Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $parts = ($cargo -replace '-.*$', '').Split('.')
+          $version = "$([int]$parts[0] + 1).$($parts[1]).$($parts[2]).0"
+          Write-Output "Versión del paquete: $version"
+          $identity = [System.Security.SecurityElement]::Escape($identity)
+          $publisher = [System.Security.SecurityElement]::Escape($publisher)
+          $display = [System.Security.SecurityElement]::Escape($display)
+
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Directory |
+            Where-Object { $_.Name -match '^10\.' -and (Test-Path "$($_.FullName)\x64\makeappx.exe") } |
+            Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+          $tools = "$($sdk.FullName)\x64"
+          Write-Output "Windows SDK: $tools"
+
+          # Lo que instala el NSIS de esta variante (para comparar con el paquete).
+          $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-tauri\target' }
+          $nsis = Get-ChildItem "$target\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
+          Write-Output "Contenido del instalador NSIS ($($nsis.Name)):"
+          & 7z l $nsis.FullName | Select-String -NotMatch '\$PLUGINSDIR' | Out-String | Write-Output
+
+          $root = 'msix\paquete'
+          New-Item -ItemType Directory -Force $root, "$root\models", msix\store, msix\prueba | Out-Null
+          Copy-Item -Recurse src-tauri\msix\Assets "$root\Assets"
+          Copy-Item "$target\release\iuretranscribe.exe" "$root\IureTranscribe.exe"
+          $triple = ((rustc -vV) | Select-String '^host: ').ToString().Substring(6).Trim()
+          Copy-Item "src-tauri\binaries\iuretranscribe-diarize-$triple.exe" "$root\iuretranscribe-diarize.exe"
+          Copy-Item src-tauri\resources\models\ggml-base.bin "$root\models\ggml-base.bin"
+          # Cargador de Vulkan (vulkan-1.dll, Apache-2.0): lo instalan los controladores de
+          # video; sin él el ejecutable ni siquiera abre. Con él, sin GPU la app usa el procesador.
+          $deps = & dumpbin /dependents "$root\IureTranscribe.exe" | Out-String
+          Write-Output $deps
+          if ($deps -match 'vulkan-1\.dll') {
+            $loader = @("$env:VULKAN_SDK\Bin\vulkan-1.dll", "$env:SystemRoot\System32\vulkan-1.dll") | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $loader) { Write-Output "::error::El ejecutable depende de vulkan-1.dll y no se encontró el cargador"; exit 1 }
+            Write-Output "Cargador de Vulkan: $loader ($((Get-Item $loader).VersionInfo.FileVersion))"
+            Copy-Item $loader "$root\vulkan-1.dll"
+          }
+          $manifest = Get-Content src-tauri\msix\AppxManifest.xml -Raw
+          $manifest = $manifest.Replace('@IDENTITY_NAME@', $identity).Replace('@PUBLISHER@', $publisher)
+          $manifest = $manifest.Replace('@PUBLISHER_DISPLAY_NAME@', $display).Replace('@VERSION@', $version)
+          Set-Content "$root\AppxManifest.xml" $manifest -Encoding utf8
+          Get-ChildItem -Recurse $root | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200 | Write-Output
+
+          # resources.pri: idiomas (es-MX, en-US) e iconos sin fondo (altform-unplated) de la barra de tareas.
+          & "$tools\makepri.exe" createconfig /cf msix\priconfig.xml /dq es-MX_en-US /o
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$tools\makepri.exe" new /pr $root /cf msix\priconfig.xml /mn "$root\AppxManifest.xml" /of "$root\resources.pri" /o
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msix = 'iuretranscribe-windows-x64-vulkan.msix'
+          & "$tools\makeappx.exe" pack /d $root /p "msix\store\$msix" /o
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Copia de prueba: certificado autofirmado con el mismo Publisher.
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher -KeyUsage DigitalSignature `
+            -FriendlyName 'IureTranscribe (prueba)' -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          $pass = ConvertTo-SecureString -String 'prueba' -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath msix\prueba.pfx -Password $pass | Out-Null
+          Export-Certificate -Cert $cert -FilePath msix\prueba\iuretranscribe-prueba.cer | Out-Null
+          $prueba = 'msix\prueba\iuretranscribe-windows-x64-vulkan-prueba.msix'
+          Copy-Item "msix\store\$msix" $prueba
+          & "$tools\signtool.exe" sign /fd SHA256 /f msix\prueba.pfx /p prueba $prueba
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item msix\prueba.pfx
+
+          # Prueba (el runner no tiene GPU): instalar la copia firmada; por el alias, que da
+          # identidad de paquete, pedir la configuración MCP (debe apuntar al alias, no a la
+          # carpeta versionada de WindowsApps) y hablar con el servidor MCP por stdio; abrir
+          # la ventana y comprobar que crea la carpeta de modelos en el AppData del paquete;
+          # desinstalar.
+          Import-Certificate -FilePath msix\prueba\iuretranscribe-prueba.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          Add-AppxPackage -Path $prueba
+          $pkg = Get-AppxPackage | Where-Object { $_.Name -eq $identity -or $_.Name -eq 'Iurefficient.IureTranscribe' } | Select-Object -First 1
+          Write-Output "Instalado: $($pkg.PackageFullName)"
+          $alias = "$env:LOCALAPPDATA\Microsoft\WindowsApps\iuretranscribe.exe"
+          $fallos = @()
+          try {
+            $cfg = (& $alias --mcp-config 2>&1 | Out-String)
+            Write-Output "iuretranscribe --mcp-config (alias):`n$cfg"
+            if ($cfg -notmatch '--mcp' -or $cfg -notmatch 'WindowsApps\\\\iuretranscribe\.exe') { $fallos += 'la configuración MCP no apunta al alias de ejecución' }
+
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($alias, '--mcp')
+            $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+            $psi.UseShellExecute = $false
+            $p = [System.Diagnostics.Process]::Start($psi)
+            $p.StandardInput.WriteLine('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}')
+            $p.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+            $p.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+            $p.StandardInput.Close()
+            $outTask = $p.StandardOutput.ReadToEndAsync(); $errTask = $p.StandardError.ReadToEndAsync()
+            if (-not $p.WaitForExit(60000)) { $p.Kill(); $fallos += 'el servidor MCP no terminó en 60 s' }
+            $mcp = $outTask.Result
+            Write-Output "iuretranscribe --mcp (alias):`n$mcp"
+            Write-Output "stderr: $($errTask.Result | Select-Object -Last 20)"
+            if ($mcp -notmatch 'transcribe_file') { $fallos += 'el servidor MCP no listó sus herramientas' }
+
+            Start-Process "shell:AppsFolder\$($pkg.PackageFamilyName)!IureTranscribe"
+            Start-Sleep -Seconds 20
+            $gui = Get-Process -Name IureTranscribe -ErrorAction SilentlyContinue
+            if ($gui) { Write-Output "La ventana sigue abierta tras 20 s (PID $($gui.Id -join ', '))" } else { $fallos += 'la app se cerró sola al abrir la ventana' }
+            $modelos = Get-ChildItem "$env:LOCALAPPDATA\Packages\$($pkg.PackageFamilyName)\LocalCache\Roaming" -Recurse -Directory -Filter models -ErrorAction SilentlyContinue
+            if ($modelos) { Write-Output "Carpeta de modelos (AppData virtualizado): $($modelos.FullName -join ', ')" } else { $fallos += 'no apareció la carpeta de modelos en el AppData del paquete' }
+            $gui | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          } finally {
+            Get-Process -Name IureTranscribe, iuretranscribe-diarize -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-AppxPackage -Package $pkg.PackageFullName
+            Write-Output "Desinstalado: $($pkg.PackageFullName)"
+          }
+          if ($fallos) { $fallos | ForEach-Object { Write-Output "::error::MSIX: $_" }; exit 1 }
+          Get-ChildItem msix\store, msix\prueba | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
+      - name: Subir el MSIX para la Store
+        if: matrix.name == 'windows-x64-vulkan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-store
+          path: msix/store/*
+      - name: Subir el MSIX de prueba
+        if: matrix.name == 'windows-x64-vulkan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-prueba
+          path: msix/prueba/*
+
       # El .app ya viene notarizado y engrapado por Tauri; se notariza también el .dmg
       # (para que Gatekeeper lo acepte al abrirlo sin conexión) y se comprueba todo como
       # lo haría un Mac. El .app.tar.gz del actualizador no cambia, así que su .sig vale.

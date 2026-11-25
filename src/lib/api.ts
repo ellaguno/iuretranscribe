@@ -226,6 +226,8 @@ export interface SystemInfo {
   recordingsDir: string;
   version: string;
   updateTarget: string;
+  /** Instalada desde Microsoft Store: la actualiza la Store (sin actualizador ni avisos). */
+  fromStore: boolean;
   supportedExtensions: string[];
 }
 

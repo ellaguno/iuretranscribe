@@ -457,7 +457,7 @@ export async function init() {
   window.addEventListener("focus", () => {
     if (!app.iureSession?.loggedIn) refreshIureSession();
   });
-  if (settings.checkUpdates) {
+  if (settings.checkUpdates && !sys.fromStore) {
     setTimeout(() => {
       import("./updater").then((m) => m.checkForUpdates(true)).catch(() => {});
     }, 6000);

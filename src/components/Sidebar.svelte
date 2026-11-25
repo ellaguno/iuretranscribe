@@ -86,13 +86,13 @@
     {/each}
   </div>
 
-  {#if app.updateNotice}
+  {#if app.updateNotice && !app.sys?.fromStore}
     <button class="update" onclick={() => openUrl(app.updateNotice!.url)} title={collapsed ? t("sidebar.newVersion", { version: app.updateNotice.version }) : t("sidebar.openDownloadPage")}>
       <Icon name="download" size={14} />
       <span class="label">{t("sidebar.newVersion", { version: app.updateNotice.version })}</span>
     </button>
   {/if}
-  {#if app.gpuNotice}
+  {#if app.gpuNotice?.url}
     <button class="update gpu" class:bad={app.gpuNotice.level === "none"} onclick={() => openUrl(app.gpuNotice!.url)} title={app.gpuNotice.message}>
       <Icon name="download" size={14} />
       <span class="label">{app.gpuNotice.level === "none" ? t("sidebar.gpuNone") : t("sidebar.gpuCpu")}</span>

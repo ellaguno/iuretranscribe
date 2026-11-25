@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Paquete MSIX de IureTranscribe (variante Vulkan) para Microsoft Store. build.yml sustituye los @…@:
+    @IDENTITY_NAME@, @PUBLISHER@, @PUBLISHER_DISPLAY_NAME@: los de Partner Center
+      (Administración de productos → Identidad del producto), en las variables del repo
+      MSIX_IDENTITY_NAME, MSIX_PUBLISHER y MSIX_PUBLISHER_DISPLAY_NAME.
+    @VERSION@: la de Cargo.toml con el primer número +1 y un .0 al final (0.8.5 → 1.8.5.0;
+      la Store no acepta un primer número 0 y exige el cuarto en 0).
+
+  Sin unvirtualizedResources: la configuración, los trabajos y los modelos de Whisper van a
+  AppData, que el paquete virtualiza en su propia carpeta (la app y su modo MCP, lanzado por el
+  alias, ven la misma). Las grabaciones y transcripciones van a Música o a la carpeta del
+  archivo, que no se virtualizan.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop rescap">
+
+  <Identity
+    Name="@IDENTITY_NAME@"
+    Publisher="@PUBLISHER@"
+    Version="@VERSION@"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>IureTranscribe</DisplayName>
+    <PublisherDisplayName>@PUBLISHER_DISPLAY_NAME@</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="es-MX" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="IureTranscribe" Executable="IureTranscribe.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="IureTranscribe"
+        Description="Transcripción local de audio y video con Whisper, subtítulos, resumen y minuta"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Enlaces iuretranscribe:// (transcribe?path=…, record, settings); fuera del paquete
+             la app los registra al arrancar, aquí el registro estaría virtualizado. -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="iuretranscribe" Parameters="&quot;%1&quot;">
+            <uap:DisplayName>IureTranscribe</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+        <!-- `iuretranscribe` en la terminal y como comando de los clientes MCP
+             (`iuretranscribe --mcp`): la ruta real cambia con cada versión. -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="IureTranscribe.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="iuretranscribe.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>

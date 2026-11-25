@@ -343,6 +343,50 @@ En Linux, la primera vez importa `OPENROUTER_API_KEY` y `OPENROUTER_MODEL` de
 
 </details>
 
+## Microsoft Store (MSIX)
+
+El trabajo `windows-x64-vulkan` de `build.yml` genera además el paquete MSIX para Microsoft
+Store. La Store no deja elegir variante, así que se publica la de **Vulkan** (GPU AMD, Intel o
+NVIDIA y, si no hay, el procesador); CUDA y CPU siguen sólo en la página de releases. Salen dos
+artefactos de la ejecución (no van a la release):
+
+- `msix-store`: `iuretranscribe-windows-x64-vulkan.msix`, sin firmar, para subir a Partner
+  Center (la Store lo firma).
+- `msix-prueba`: el mismo paquete firmado con un certificado de prueba y su `.cer`. Para
+  instalarlo a mano: importar el `.cer` en *Equipo local → Personas de confianza* y abrir el
+  `.msix`.
+
+Lleva lo mismo que el instalador NSIS de Vulkan (ejecutable, sidecar
+`iuretranscribe-diarize.exe` y el modelo Base en `models\`) más el cargador de Vulkan
+(`vulkan-1.dll`), para que la app abra aunque el equipo no tenga controladores con Vulkan. El
+workflow instala la copia de prueba en el runner (sin GPU), comprueba por el alias
+`iuretranscribe` la configuración MCP y el servidor MCP por stdio, abre la ventana, verifica la
+carpeta de modelos en el AppData del paquete y la desinstala. Se puede lanzar a mano con
+*Run workflow* (`workflow_dispatch`) sin publicar nada.
+
+La identidad sale de Partner Center (*Identidad del producto*) y va en tres variables del repo
+(*Settings → Secrets and variables → Actions → Variables*): `MSIX_IDENTITY_NAME`,
+`MSIX_PUBLISHER` (`CN=…`) y `MSIX_PUBLISHER_DISPLAY_NAME`. El nombre visible del paquete es
+`IureTranscribe`, el reservado en Partner Center. El manifiesto está en
+`src-tauri/msix/AppxManifest.xml`; declara `runFullTrust`, `internetClient` y `microphone`, el
+esquema `iuretranscribe://` y el alias de ejecución `iuretranscribe.exe` (el comando que se
+registra en Claude Desktop y VS Code, porque la ruta real cambia con cada versión). No usa
+`unvirtualizedResources`: ajustes, trabajos y modelos quedan en el AppData virtualizado del
+paquete; las grabaciones y transcripciones van a Música o junto al audio, que no se virtualizan.
+Una limitación: la «cuenta activa» compartida con las demás apps de Iurefficient sólo se
+comparte si otra app ya la creó; la sesión y la contraseña WebDAV sí, porque van en el llavero.
+
+Instalada desde la Store, la app **no se actualiza sola** ni avisa de versiones en GitHub (lo
+hace la Store; política de la tienda): no registra el actualizador de Tauri y oculta la opción en
+Ajustes. Tampoco recomienda instalar otra variante si la GPU no sirve; sigue con el procesador.
+La detecta con `GetCurrentPackageFullName` (`src-tauri/src/store.rs`). Descargar modelos sí
+sigue igual.
+
+La versión del paquete es la de `Cargo.toml` con el primer número más 1 y un `.0` al final
+(`0.8.5` → `1.8.5.0`), porque la Store no acepta un primer número 0 y exige el cuarto en 0. Cada
+envío necesita una versión mayor que la anterior. Política de privacidad para la ficha:
+<https://github.com/ellaguno/iuretranscribe/blob/main/PRIVACY.md>.
+
 ## Política de firma de código
 
 Por ahora los instaladores de Windows y macOS **no están firmados**: SmartScreen de Windows
@@ -377,8 +421,9 @@ el audio nunca sale de la máquina. En concreto, IureTranscribe sólo se conecta
   Ajustes → Apps de Iurefficient muestra la última versión de cada app. Las actualizaciones se
   descargan de la página de releases sólo cuando el usuario las acepta.
 
-No recopila telemetría ni estadísticas de uso. Las credenciales se guardan en el llavero del
-sistema operativo, nunca en archivos de configuración.
+No recopila telemetría ni estadísticas de uso. Las credenciales de Iurefficient se guardan en el
+llavero del sistema operativo; la llave de OpenRouter, en el archivo de ajustes del usuario.
+Política completa: [PRIVACY.md](PRIVACY.md).
 
 ## Licencia
 

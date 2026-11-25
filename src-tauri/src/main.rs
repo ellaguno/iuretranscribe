@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // Instalada desde Microsoft Store (MSIX): sin autoactualización y con el alias de
+    // ejecución como comando para los clientes MCP.
+    iuretranscribe_lib::store::init();
     match std::env::args().nth(1).as_deref() {
         // Servidor MCP por stdio para Claude Desktop, Claude Code, VS Code… Sin ventana.
         Some("--mcp") => std::process::exit(iuretranscribe_lib::run_mcp()),
