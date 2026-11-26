@@ -345,6 +345,49 @@ On Linux, the first time it imports `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` 
 
 </details>
 
+## Microsoft Store (MSIX)
+
+The `windows-x64-vulkan` job of `build.yml` also builds the MSIX package for the Microsoft
+Store. The Store cannot offer variants, so the **Vulkan** one is published (AMD, Intel or NVIDIA
+GPUs and, without one, the CPU); CUDA and CPU stay on the releases page only. The run produces
+two artifacts (not attached to the release):
+
+- `msix-store`: `iuretranscribe-windows-x64-vulkan.msix`, unsigned, to upload to Partner Center
+  (the Store signs it).
+- `msix-prueba`: the same package signed with a test certificate, plus its `.cer`. To install it
+  by hand: import the `.cer` into *Local Machine → Trusted People* and open the `.msix`.
+
+It contains what the Vulkan NSIS installer installs (executable, `iuretranscribe-diarize.exe`
+sidecar and the Base model in `models\`) plus the Vulkan loader (`vulkan-1.dll`), so the app
+opens even on computers without Vulkan drivers. The workflow installs the test copy on the
+(GPU-less) runner, checks the MCP configuration and the stdio MCP server through the
+`iuretranscribe` alias, opens the window, verifies the models folder in the package's AppData
+and uninstalls it. It can be run by hand with *Run workflow* (`workflow_dispatch`) without
+publishing anything.
+
+The identity comes from Partner Center (*Product identity*) through three repository variables:
+`MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER` (`CN=…`) and `MSIX_PUBLISHER_DISPLAY_NAME`. The package
+display name is `IureTranscribe`, the one reserved in Partner Center. The manifest is
+`src-tauri/msix/AppxManifest.xml`; it declares `runFullTrust`, `internetClient` and `microphone`,
+the `iuretranscribe://` scheme and the `iuretranscribe.exe` execution alias (the command
+registered in Claude Desktop and VS Code, because the real path changes with every version). It
+does not use `unvirtualizedResources`: settings, jobs and models stay in the package's
+virtualized AppData; recordings and transcripts go to Music or next to the audio, which are not
+virtualized. One limitation: the "active account" shared with the other Iurefficient apps is only
+shared if another app created it first; the session and WebDAV password are, since they live in
+the keychain.
+
+Installed from the Store, the app **does not update itself** nor announce GitHub releases (the
+Store does it; Store policy): it does not register the Tauri updater and hides the option in
+Settings. It also does not recommend installing another variant if the GPU does not work; it
+keeps using the CPU. It is detected with `GetCurrentPackageFullName` (`src-tauri/src/store.rs`).
+Downloading models works as before.
+
+The package version is the one in `Cargo.toml` with the first number plus 1 and a trailing `.0`
+(`0.8.5` → `1.8.5.0`), because the Store rejects a leading 0 and requires the fourth number to
+be 0. Each submission needs a higher version than the previous one. Privacy policy for the
+listing: <https://github.com/ellaguno/iuretranscribe/blob/main/PRIVACY.md>.
+
 ## Code signing policy
 
 The Windows and macOS installers are **not code-signed** at the moment: Windows SmartScreen may
@@ -378,8 +421,9 @@ audio never leaves the machine. Specifically, IureTranscribe connects only to:
   → Iurefficient apps shows the latest version of each app. Updates are downloaded from the
   releases page only when the user accepts them.
 
-It collects no telemetry and no usage statistics. Credentials are stored in the operating
-system keychain, never in configuration files.
+It collects no telemetry and no usage statistics. Iurefficient credentials are stored in the
+operating system keychain; the OpenRouter key, in the user's settings file. Full policy:
+[PRIVACY.md](PRIVACY.md).
 
 ## License
 

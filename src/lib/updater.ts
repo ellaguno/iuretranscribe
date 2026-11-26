@@ -13,6 +13,8 @@ import { t } from "./i18n.svelte";
  * `silent` = chequeo de arranque (no molesta si no hay nada); desde Ajustes es explícito.
  */
 export async function checkForUpdates(silent: boolean): Promise<void> {
+  // Instalada desde Microsoft Store: la actualiza la Store; no se descarga ni se avisa nada.
+  if (app.sys?.fromStore) return;
   const target = app.sys?.updateTarget;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");

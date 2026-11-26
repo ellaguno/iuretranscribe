@@ -111,6 +111,21 @@ fn cpu_variant_name() -> String {
 fn notice_for(result: &str) -> Option<GpuNotice> {
     let backend = transcribe::backend_name();
     let variant = cpu_variant_name();
+    // En la Store no se puede remitir a otro instalador: si sólo funciona el procesador,
+    // la app sigue con él sin aviso; si no arranca, se dice sin enlace de descarga.
+    if crate::store::from_store() {
+        return match result {
+            "none" => Some(GpuNotice {
+                level: "none".into(),
+                message: tr!(
+                    "The transcription engine of IureTranscribe ({backend}) does not start on this computer, neither with the GPU nor with the CPU. Updating the graphics drivers may fix it.",
+                    "El motor de transcripción de IureTranscribe ({backend}) no arranca en esta computadora, ni con GPU ni con procesador. Actualizar los controladores de video puede resolverlo."
+                ),
+                url: String::new(),
+            }),
+            _ => None,
+        };
+    }
     match result {
         "cpu" => Some(GpuNotice {
             level: "cpu".into(),
@@ -195,7 +210,9 @@ fn decide_use_gpu(
         if result == "none" {
             return Err(n.message);
         }
-        return Ok(false);
     }
-    Ok(wanted)
+    match result.as_str() {
+        "gpu" => Ok(wanted),
+        _ => Ok(false),
+    }
 }

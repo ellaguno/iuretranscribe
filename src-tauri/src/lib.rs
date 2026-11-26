@@ -6,6 +6,7 @@ mod mcp;
 mod models;
 mod recorder;
 mod settings;
+pub mod store;
 mod subtitles;
 mod transcribe;
 mod vocab;
@@ -54,6 +55,8 @@ struct SystemInfo {
     version: &'static str,
     /// Identificador de plataforma y variante para el actualizador (p. ej. `linux-x86_64-cuda`).
     update_target: String,
+    /// Instalada desde Microsoft Store: la actualiza la Store (sin actualizador ni avisos).
+    from_store: bool,
     log_path: Option<String>,
     supported_extensions: &'static [&'static str],
 }
@@ -139,6 +142,7 @@ fn system_info(state: State<'_, AppState>) -> SystemInfo {
         recordings_dir: recordings_dir(&state).to_string_lossy().into_owned(),
         version: env!("CARGO_PKG_VERSION"),
         update_target: update_target(),
+        from_store: store::from_store(),
         log_path: LOG_PATH.get().and_then(|p| p.as_ref()).map(|p| p.to_string_lossy().into_owned()),
         supported_extensions: audio::SUPPORTED_EXTENSIONS,
     }
@@ -168,6 +172,10 @@ struct UpdateNotice {
 /// Aviso de versión nueva en GitHub (sin instalar): funciona para cualquier instalador.
 #[tauri::command]
 async fn check_update_notice() -> Result<Option<UpdateNotice>, String> {
+    // La Store no permite avisar de versiones fuera de ella: la actualiza la propia Store.
+    if store::from_store() {
+        return Ok(None);
+    }
     let r = iurefficient_connect::releases::consultar("ellaguno/iuretranscribe", env!("CARGO_PKG_VERSION"), &iure_user_agent())
         .await
         .map_err(|e| format!("{e:#}"))?;
@@ -1523,7 +1531,7 @@ pub fn run() {
         std::process::exit(code);
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Una sola instancia: si el usuario abre otro archivo o un enlace
         // `iuretranscribe://`, llega a la ventana ya abierta como evento.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -1542,16 +1550,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+    // Instalada desde Microsoft Store no se actualiza sola (lo hace la Store): ni
+    // siquiera se registra el actualizador de Tauri.
+    let builder = if store::from_store() { builder } else { builder.plugin(tauri_plugin_updater::Builder::new().build()) };
+    builder
         .setup(|app| {
             // Esquema `iuretranscribe://` (en Linux y Windows se registra en tiempo de
-            // ejecución para que también funcione con AppImage y en desarrollo).
+            // ejecución para que también funcione con AppImage y en desarrollo). En el
+            // paquete MSIX lo declara el manifiesto (y el registro estaría virtualizado).
             #[cfg(any(windows, target_os = "linux"))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                if let Err(e) = app.deep_link().register_all() {
-                    log::warn!("no se pudo registrar el esquema iuretranscribe://: {e}");
+                if !store::from_store() {
+                    if let Err(e) = app.deep_link().register_all() {
+                        log::warn!("no se pudo registrar el esquema iuretranscribe://: {e}");
+                    }
                 }
             }
             let config_dir = app.path().app_config_dir()?;

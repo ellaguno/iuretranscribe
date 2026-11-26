@@ -595,7 +595,7 @@
               {:else}
                 <span class="pill">{t("settings.notInstalled")}</span>
               {/if}
-              {#if a.latestVersion}<span class="hint">{t("settings.latest", { version: a.latestVersion })}</span>{/if}
+              {#if a.latestVersion && !(a.id === "transcribe" && app.sys?.fromStore)}<span class="hint">{t("settings.latest", { version: a.latestVersion })}</span>{/if}
             </div>
             <p class="hint">{a.description}</p>
             <div class="row-actions">
@@ -626,14 +626,18 @@
         <button class:active={s.theme === id} onclick={() => saveSettings({ theme: id as "system" | "light" | "dark" })}><Icon name={icon} size={15} /> {t(label as Key)}</button>
       {/each}
     </div>
-    <div class="switchrow">
-      <div>
-        <span class="label">{t("settings.checkUpdates")}</span>
-        <p class="hint">{t("settings.checkUpdatesHint", { version: app.sys?.version ?? "", target: app.sys?.updateTarget ?? "" })}</p>
+    {#if app.sys?.fromStore}
+      <p class="hint">{t("settings.storeUpdates", { version: app.sys.version })}</p>
+    {:else}
+      <div class="switchrow">
+        <div>
+          <span class="label">{t("settings.checkUpdates")}</span>
+          <p class="hint">{t("settings.checkUpdatesHint", { version: app.sys?.version ?? "", target: app.sys?.updateTarget ?? "" })}</p>
+        </div>
+        <button class="switch" class:on={s.checkUpdates} aria-label={t("settings.checkUpdates")} onclick={() => saveSettings({ checkUpdates: !s.checkUpdates })}></button>
       </div>
-      <button class="switch" class:on={s.checkUpdates} aria-label={t("settings.checkUpdates")} onclick={() => saveSettings({ checkUpdates: !s.checkUpdates })}></button>
-    </div>
-    <div><button class="btn sm" onclick={() => import("../lib/updater").then((m) => m.checkForUpdates(false))}><Icon name="refresh" size={14} /> {t("settings.checkNow")}</button></div>
+      <div><button class="btn sm" onclick={() => import("../lib/updater").then((m) => m.checkForUpdates(false))}><Icon name="refresh" size={14} /> {t("settings.checkNow")}</button></div>
+    {/if}
     <p class="hint">{t("settings.modelsAt")} <code>{app.sys?.modelsDir}</code><br />{t("settings.settingsAt")} <code>{app.sys?.settingsPath}</code>{#if app.sys?.logPath}<br />{t("settings.logAt")} <code>{app.sys.logPath}</code>{/if}</p>
   </section>
 </div>
