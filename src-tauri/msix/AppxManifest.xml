@@ -52,11 +52,9 @@
       <Extensions>
         <!-- Enlaces iuretranscribe:// (transcribe?path=…, record, settings); fuera del paquete
              la app los registra al arrancar, aquí el registro estaría virtualizado. -->
-        <uap:Extension Category="windows.protocol">
-          <uap:Protocol Name="iuretranscribe" Parameters="&quot;%1&quot;">
-            <uap:DisplayName>IureTranscribe</uap:DisplayName>
-          </uap:Protocol>
-        </uap:Extension>
+        <uap3:Extension Category="windows.protocol">
+          <uap3:Protocol Name="iuretranscribe" Parameters="&quot;%1&quot;" />
+        </uap3:Extension>
         <!-- `iuretranscribe` en la terminal y como comando de los clientes MCP
              (modo MCP): la ruta real cambia con cada versión. -->
         <uap3:Extension Category="windows.appExecutionAlias" Executable="IureTranscribe.exe" EntryPoint="Windows.FullTrustApplication">
