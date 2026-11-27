@@ -805,6 +805,7 @@ async fn start_recording(app: AppHandle, state: State<'_, AppState>, speakers: O
         capture_system: settings.record_system,
         output_dir: recordings_dir(&state),
         live,
+        title: None,
     };
     let rec = state.recorder.clone();
     tauri::async_runtime::spawn_blocking(move || rec.start(opts))

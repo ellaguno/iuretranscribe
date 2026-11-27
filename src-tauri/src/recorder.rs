@@ -65,6 +65,21 @@ pub struct StartOptions {
     pub capture_system: bool,
     pub output_dir: PathBuf,
     pub live: Option<LiveOptions>,
+    /// Nombre de la reunión: el audio se llama «<título> <fecha>.wav» en vez de «Grabación <fecha>».
+    pub title: Option<String>,
+}
+
+/// Un título como parte segura de un nombre de archivo (sin `/ \ : * ? " < > |` ni controles,
+/// espacios colapsados, sin puntos ni espacios en los extremos, hasta 80 caracteres). Vacío si
+/// no queda nada.
+pub fn file_title(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c })
+        .collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = collapsed.chars().take(80).collect();
+    cut.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,7 +148,10 @@ impl Recorder {
         std::fs::create_dir_all(&opts.output_dir)
             .map_err(|e| anyhow!(tr!("Could not create the recordings folder {}: {e}", "No se pudo crear la carpeta de grabaciones {}: {e}", opts.output_dir.display())))?;
         let stamp = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
-        let name = tr!("Recording {stamp}.wav", "Grabación {stamp}.wav");
+        let name = match opts.title.as_deref().map(file_title).filter(|t| !t.is_empty()) {
+            Some(t) => format!("{t} {stamp}.wav"),
+            None => tr!("Recording {stamp}.wav", "Grabación {stamp}.wav"),
+        };
         let path = opts.output_dir.join(name);
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -923,6 +941,15 @@ fn spawn_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// El audio se llama como la reunión, sin caracteres que rompan un nombre de archivo.
+    #[test]
+    fn file_title_is_a_safe_name() {
+        assert_eq!(file_title("  Junta / Altamira: 2026?  "), "Junta Altamira 2026");
+        assert_eq!(file_title("..."), "");
+        assert_eq!(file_title(&"x".repeat(300)).chars().count(), 80);
+        assert_eq!(file_title("a\u{0}b\nc"), "a b c");
+    }
     /// Alimenta el hilo en vivo con un archivo de voz y comprueba que emite segmentos
     /// ordenados. Requiere IURE_TEST_MODEL e IURE_TEST_AUDIO.
     #[test]
@@ -983,6 +1010,7 @@ mod tests {
                 capture_system: std::env::var("IURE_TEST_RECORD_SYS").as_deref() != Ok("0"),
                 output_dir: dir,
                 live: None,
+                title: None,
             })
             .expect("start");
         let secs: f64 = std::env::var("IURE_TEST_RECORD_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0);

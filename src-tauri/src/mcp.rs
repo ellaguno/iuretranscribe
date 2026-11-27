@@ -144,7 +144,7 @@ impl Handler for Server {
             "audio_info" => self.audio_info(args)?,
             "list_recordings" => self.list_recordings(args)?,
             "transcription_setup" => self.transcription_setup()?,
-            "start_recording" => self.start_recording()?,
+            "start_recording" => self.start_recording(args)?,
             "generate_document" => self.generate_document(args, call)?,
             "recording_status" => serde_json::to_value(self.recorder.status()).map_err(anyhow::Error::from)?,
             "pause_recording" => {
@@ -392,7 +392,7 @@ impl Server {
 
     /// Empieza a grabar con los ajustes de la app (sin transcripción en vivo: se transcribe al
     /// terminar). Error si ya hay una grabación en este proceso.
-    fn start_recording(&self) -> Result<Value> {
+    fn start_recording(&self, args: &Value) -> Result<Value> {
         if self.recorder.status().active {
             return Err(anyhow!(tr!("A recording is already in progress.", "Ya hay una grabación en curso.")));
         }
@@ -403,10 +403,15 @@ impl Server {
             capture_system: settings.record_system,
             output_dir: self.recordings_dir(),
             live: None,
+            title: str_arg(args, "title").map(|t| t.chars().take(300).collect()),
         };
         let path = self.recorder.start(opts)?;
         log::info!("MCP: grabando en {}", path.display());
-        inbox::post(self.paths.inbox_dir.as_deref(), &Record::new(&path, Some("recording")));
+        let mut rec = Record::new(&path, Some("recording"));
+        if let Some(t) = str_arg(args, "title").map(str::trim).filter(|t| !t.is_empty()) {
+            rec.meta = Some(inbox::Meta { title: t.chars().take(300).collect(), ..Default::default() });
+        }
+        inbox::post(self.paths.inbox_dir.as_deref(), &rec);
         Ok(json!({"path": path.to_string_lossy(), "active": true, "openLink": open_link(&path)}))
     }
 
@@ -841,7 +846,11 @@ fn tools() -> Value {
             "description": lang::pick(
                 "Starts recording a meeting (microphone and/or system audio, as set in the app) into the recordings folder. Only one at a time. The recording lives in this process: keep the client open and call stop_recording when done.",
                 "Empieza a grabar una reunión (micrófono y/o audio del sistema, según la app) en la carpeta de grabaciones. Una a la vez. La grabación vive en este proceso: mantén abierto el cliente y llama a stop_recording al terminar."),
-            "inputSchema": {"type": "object", "properties": {}},
+            "inputSchema": {"type": "object", "properties": {
+                "title": {"type": "string", "description": lang::pick(
+                    "Meeting name: the audio file is named after it (instead of «Recording <date>»).",
+                    "Nombre de la reunión: el audio se llama así (en vez de «Grabación <fecha>»).")},
+            }},
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
         },
         {
