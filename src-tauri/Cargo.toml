@@ -1,6 +1,6 @@
 [package]
 name = "iuretranscribe"
-version = "0.8.6"
+version = "0.8.7"
 description = "Transcripción de audio y video con Whisper, con resumen y minuta"
 authors = ["Iurefficient"]
 edition = "2021"
@@ -27,7 +27,7 @@ serde_json = "1"
 whisper-rs = { version = "0.16", features = ["log_backend"] }
 symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "wav", "flac", "ogg", "vorbis", "pcm", "alac", "mkv"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
 futures-util = "0.3"
 bytes = "1"
 anyhow = "1"

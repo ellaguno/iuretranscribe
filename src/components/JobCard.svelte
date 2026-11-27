@@ -13,8 +13,8 @@
 
 <div class="card job" class:selected role="button" tabindex="0" onclick={onselect} onkeydown={(e) => e.key === "Enter" && onselect()}>
   <div class="head">
-    <div class="ficon" class:active={isActive(job)} class:done={job.status === "done"} class:err={job.status === "error"}>
-      {#if isActive(job)}
+    <div class="ficon" class:active={isActive(job) || job.status === "external"} class:done={job.status === "done"} class:err={job.status === "error"}>
+      {#if isActive(job) || job.status === "external"}
         <span class="spin"><Icon name="loader" size={16} /></span>
       {:else if job.status === "done"}
         <Icon name="check" size={16} stroke={2.5} />
@@ -44,6 +44,13 @@
     <div class="progress" class:indeterminate={job.status !== "transcribing"}><div style="width:{job.percent}%"></div></div>
     <div class="status">
       <span>{stageLabel(job.status)}{job.status === "transcribing" ? ` · ${job.percent}%` : ""}</span>
+      <span>{fmtDuration(elapsed)}</span>
+    </div>
+  {:else if job.status === "external"}
+    <!-- Lo graba o transcribe el servidor MCP (otra app): aquí sólo se muestra. -->
+    <div class="progress indeterminate"><div style="width:0%"></div></div>
+    <div class="status">
+      <span>{t(job.external === "recording" ? "job.externalRecording" : "job.externalTranscribing")}</span>
       <span>{fmtDuration(elapsed)}</span>
     </div>
   {:else if job.status === "done" && job.result}

@@ -275,6 +275,47 @@ export interface TranscriptResult {
 
 export type DocKind = "summary" | "minutes";
 
+/** Datos de la reunión tal como llegan del servidor MCP. */
+export interface InboxMeta {
+  title: string;
+  date: string;
+  place: string;
+  participants: string;
+  notes: string;
+}
+
+/** Un cambio de un trabajo hecho por el servidor MCP (buzón `jobs-inbox/`). */
+export interface InboxRecord {
+  path: string;
+  name?: string;
+  sizeBytes?: number;
+  durationSecs?: number;
+  status?: "recording" | "recorded" | "transcribing" | "done" | "error";
+  error?: string;
+  result?: TranscriptResult;
+  meta?: InboxMeta;
+  summaryPath?: string;
+  minutesPath?: string;
+  /** ms desde 1970 */
+  at: number;
+}
+
+export interface InboxEntry {
+  file: string;
+  record: InboxRecord;
+}
+
+/** Trabajo terminado reconstruido desde el disco (transcripción ya escrita). */
+export interface DiskJob {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  durationSecs: number | null;
+  result: TranscriptResult;
+  summary: DocumentResult | null;
+  minutes: DocumentResult | null;
+}
+
 export interface DocumentResult {
   kind: DocKind;
   content: string;
@@ -470,6 +511,9 @@ export const api = {
   saveJobs: (json: string) => invoke<void>("save_jobs", { json }),
   loadDocuments: (outputDir: string, baseName: string) =>
     invoke<{ summary: DocumentResult | null; minutes: DocumentResult | null }>("load_documents", { outputDir, baseName }),
+  jobFromDisk: (path: string) => invoke<DiskJob | null>("job_from_disk", { path }),
+  inboxTake: () => invoke<InboxEntry[]>("inbox_take"),
+  inboxAck: (files: string[]) => invoke<number>("inbox_ack", { files }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   /** Apps de escritorio de Iurefficient: instaladas en este equipo y última versión publicada. */
   appsStatus: (withNetwork: boolean) => invoke<AppStatus[]>("apps_status", { withNetwork }),

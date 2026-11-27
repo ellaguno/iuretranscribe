@@ -186,15 +186,22 @@ the agent chooses to read does.
 
 | Tool | What it does |
 | --- | --- |
-| `transcribe_file` | Transcribes an audio or video file, writes the files (SRT/TXT… as set in Settings) next to it and returns the text; with `timestamps`, each line with its time |
+| `transcribe_file` | Transcribes an audio or video file, writes the files (SRT/TXT… as set in Settings) next to it and returns the text; with `timestamps`, each line with its time. Takes the meeting details (`title`, `date`, `place`, `participants`, `notes`) |
 | `transcription_status` | For long files, `transcribe_file` returns a `jobId` after ~50 s and the job keeps running: this tool waits and returns the text; it also reads the rest with `offset` |
 | `read_transcript` | Reads an existing transcript or minutes, in parts |
 | `audio_info` | Duration, size and existing transcripts of a file |
 | `list_recordings` | The latest recordings made with the app, with duration and whether they are transcribed |
 | `transcription_setup` | Model, language, formats and downloaded models |
+| `generate_document` | Writes the summary (`kind: "summary"`) or the minutes (`"minutes"`) with the app's prompts and OpenRouter key, saves it next to the transcript (`<name>_summary.md` / `_minutes.md`) and returns `{kind, path, content}`; with no AI configured it returns an error |
+| `start_recording`, `recording_status`, `pause_recording`, `stop_recording` | Record a meeting without opening the window (used by IureDesk) |
 
 It uses the model, language, custom vocabulary and corrections from Settings. The model must
 be downloaded (Models section). The log goes to `iuretranscribe-mcp.log`.
+
+Whatever is recorded, transcribed or summarized over MCP shows up in the window's list (even if
+it was closed): the server leaves each change in `jobs-inbox/`, next to `jobs.json`, and the
+window picks it up. Every response carries `openLink`, `iuretranscribe://open?path=<audio path>`
+(also `abrir`), which opens that recording in the window without transcribing it again.
 
 In **Settings → AI assistants** the app detects which assistants are installed and connects
 each one:

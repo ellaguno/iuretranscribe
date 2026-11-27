@@ -14,7 +14,9 @@ import {
   type IureSessionStatus,
   type IureUploadProgress,
   type DeviceList,
+  type DiskJob,
   type DocKind,
+  type InboxRecord,
   type RecordingStatus,
   type DownloadProgress,
   type ModelInfo,
@@ -29,7 +31,8 @@ import {
 import { locale, setLang, t, tn, type Key } from "./i18n.svelte";
 
 export type View = "transcribe" | "record" | "models" | "settings";
-export type JobStatus = "queued" | "decoding" | "loading" | "transcribing" | "done" | "error" | "cancelled";
+/** `external`: lo graba o transcribe otro proceso (el servidor MCP, p. ej. para IureDesk); ver `external` en `Job`. */
+export type JobStatus = "queued" | "decoding" | "loading" | "transcribing" | "done" | "error" | "cancelled" | "external";
 
 export interface DocState {
   status: "idle" | "loading" | "done" | "error";
@@ -40,6 +43,8 @@ export interface DocState {
 
 /** Datos de la reunión que el usuario puede capturar en cualquier momento. */
 export interface JobMeta {
+  /** Título de la reunión (lo da quien graba por MCP, p. ej. IureDesk). */
+  title?: string;
   participants: string;
   date: string;
   place: string;
@@ -92,11 +97,12 @@ export function refreshPendingDate(withTime = false) {
 
 /** ¿El usuario capturó algo más allá de la fecha sugerida? */
 export function metaFilledByUser(m: JobMeta): boolean {
-  return !!(m.place.trim() || m.participants.trim() || m.notes.trim() || (m.date.trim() && !m.date.trim().startsWith(todayLabel())));
+  return !!(m.title?.trim() || m.place.trim() || m.participants.trim() || m.notes.trim() || (m.date.trim() && !m.date.trim().startsWith(todayLabel())));
 }
 
 export function metaToContext(m: JobMeta): string {
   const lines: string[] = [];
+  if (m.title?.trim()) lines.push(t("meta.ctxTitle", { v: m.title.trim() }));
   if (m.date.trim()) lines.push(t("meta.ctxDate", { v: m.date.trim() }));
   if (m.place.trim()) lines.push(t("meta.ctxPlace", { v: m.place.trim() }));
   if (m.participants.trim()) {
@@ -108,7 +114,7 @@ export function metaToContext(m: JobMeta): string {
 }
 
 export function metaFilled(m: JobMeta): boolean {
-  return !!(m.date.trim() || m.place.trim() || m.participants.trim() || m.notes.trim());
+  return !!(m.title?.trim() || m.date.trim() || m.place.trim() || m.participants.trim() || m.notes.trim());
 }
 
 /** Resultado de guardar un trabajo en Iurefficient (carpeta WebDAV, proyecto o CRM). */
@@ -165,6 +171,10 @@ export interface Job {
   speakerNames?: [string, string];
   startedAt?: number;
   finishedAt?: number;
+  /** Con `status: "external"`: qué hace el otro proceso con este archivo. */
+  external?: "recording" | "transcribing";
+  /** Último registro del buzón aplicado (ms), para dar por perdido un `external` viejo. */
+  updatedAt?: number;
 }
 
 export interface Toast {
@@ -280,7 +290,10 @@ async function handleLaunchArgsNow(args: string[]): Promise<void> {
       } else if (action === "record" || action === "grabar") app.view = "record";
       else if (action === "settings" || action === "ajustes") app.view = "settings";
       else if (action === "models" || action === "modelos") app.view = "models";
-      else {
+      else if (action === "open" || action === "abrir") {
+        // «iuretranscribe://open?path=…»: muestra esa grabación, sin volver a transcribirla.
+        for (const p of u.searchParams.getAll("path")) await openRecording(p);
+      } else {
         for (const p of u.searchParams.getAll("path")) paths.push(p);
         if (!u.searchParams.has("path")) app.view = "transcribe";
       }
@@ -371,11 +384,13 @@ function serializeJobs(): string {
     result: j.result,
     summary: j.summary.status === "loading" ? { status: "idle" } : j.summary,
     minutes: j.minutes.status === "loading" ? { status: "idle" } : j.minutes,
-    meta: { participants: j.meta.participants, date: j.meta.date, place: j.meta.place, notes: j.meta.notes },
+    meta: { title: j.meta.title || undefined, participants: j.meta.participants, date: j.meta.date, place: j.meta.place, notes: j.meta.notes },
     iure: j.iure,
     speakerNames: j.speakerNames,
     startedAt: j.startedAt,
     finishedAt: j.finishedAt,
+    external: j.status === "external" ? j.external : undefined,
+    updatedAt: j.updatedAt,
   }));
   return JSON.stringify(stored);
 }
@@ -403,7 +418,8 @@ async function restoreJobs() {
   const jobs: Job[] = stored.map((j) => ({
     ...j,
     iure: j.iure && j.iure.composed && !Array.isArray(j.iure.composed) ? { ...j.iure, composed: [j.iure.composed as unknown as ComposedDoc] } : j.iure,
-    status: isActive(j as Job) ? "queued" : j.status,
+    // Un «external» sin noticias en horas: el otro proceso terminó sin avisar (se cerró IureDesk…).
+    status: isActive(j as Job) || (j.status === "external" && Date.now() - (j.updatedAt ?? 0) > EXTERNAL_STALE_MS) ? "queued" : j.status,
     liveSegments: [],
     summary: j.summary ?? { status: "idle" },
     minutes: j.minutes ?? { status: "idle" },
@@ -425,6 +441,205 @@ async function restoreJobs() {
   app.selectedJobId = [...jobs].reverse().find((j) => j.status === "done")?.id ?? jobs.at(-1)?.id ?? null;
   const interrupted = stored.filter((j) => isActive(j as Job)).length;
   if (interrupted) toast(tn("toast.interrupted", interrupted), "info", 7000);
+}
+
+// ---------------------------------------------------------------------------
+// Buzón de trabajos: lo que se graba o transcribe por MCP (p. ej. desde IureDesk)
+// ---------------------------------------------------------------------------
+
+/** Tras este tiempo sin noticias, un trabajo `external` se da por terminado sin resultado. */
+const EXTERNAL_STALE_MS = 12 * 3600 * 1000;
+/** Registros que devuelve `inbox_take` como mucho (igual que `inbox::MAX_BATCH`). */
+const INBOX_BATCH = 100;
+let restored = false;
+let inboxRun: Promise<void> | null = null;
+
+/**
+ * Incorpora a la lista lo que dejó el servidor MCP en el buzón. Guarda `jobs.json` y sólo
+ * entonces borra los registros aplicados: si la app se cierra a medias, se repiten (son
+ * idempotentes) en vez de perderse. Una sola pasada a la vez.
+ */
+export function mergeInbox(): Promise<void> {
+  if (!restored) return Promise.resolve();
+  if (!inboxRun) {
+    inboxRun = mergeInboxNow()
+      .catch((e) => console.warn("inbox:", e))
+      .finally(() => {
+        inboxRun = null;
+      });
+  }
+  return inboxRun;
+}
+
+async function mergeInboxNow(): Promise<void> {
+  const finished: string[] = [];
+  for (let pass = 0; pass < 20; pass++) {
+    const entries = await api.inboxTake();
+    if (!entries.length) break;
+    for (const e of entries) {
+      try {
+        if (await applyInboxRecord(e.record)) finished.push(e.record.name ?? fileName(e.record.path));
+      } catch (err) {
+        console.warn("inbox record:", err);
+      }
+    }
+    clearTimeout(persistTimer);
+    await api.saveJobs(serializeJobs());
+    await api.inboxAck(entries.map((e) => e.file));
+    if (entries.length < INBOX_BATCH) break;
+  }
+  if (finished.length) toast(tn("toast.inboxDone", finished.length, { name: finished[0] }), "success", 6000);
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/** Agrega un trabajo a la lista y devuelve el de la lista (el reactivo). */
+function pushJob(job: Job): Job {
+  app.jobs.push(job);
+  return app.jobs[app.jobs.length - 1];
+}
+
+function newJob(path: string, name: string, sizeBytes: number, durationSecs: number | null, meta: JobMeta = emptyMeta()): Job {
+  return { id: crypto.randomUUID(), path, name, sizeBytes, durationSecs, status: "queued", percent: 0, liveSegments: [], summary: { status: "idle" }, minutes: { status: "idle" }, meta };
+}
+
+/** Trabajo terminado a partir de lo que ya está en el disco. */
+function jobFromDisk(d: DiskJob): Job {
+  const job = newJob(d.path, d.name, d.sizeBytes, d.durationSecs, { ...emptyMeta(), date: "" });
+  job.status = "done";
+  job.percent = 100;
+  job.result = { ...d.result, jobId: job.id };
+  if (d.summary) job.summary = { status: "done", content: d.summary.content, path: d.summary.path };
+  if (d.minutes) job.minutes = { status: "done", content: d.minutes.content, path: d.minutes.path };
+  return job;
+}
+
+async function loadDocInto(job: Job, kind: DocKind, path: string): Promise<void> {
+  try {
+    const content = await api.readTextFile(path);
+    const doc: DocState = { status: "done", content, path };
+    if (kind === "summary") job.summary = doc;
+    else job.minutes = doc;
+  } catch (e) {
+    console.warn("inbox doc:", e);
+  }
+}
+
+/** Aplica un registro del buzón. Devuelve true si el trabajo acaba de quedar transcrito. */
+async function applyInboxRecord(r: InboxRecord): Promise<boolean> {
+  if (!r || typeof r.path !== "string" || !r.path) return false;
+  const res = r.result;
+  let job =
+    app.jobs.find((j) => j.path === r.path) ??
+    (res ? app.jobs.find((j) => j.result && j.result.outputDir === res.outputDir && j.result.baseName === res.baseName) : undefined);
+  // La ventana lo está transcribiendo ella misma: su resultado manda.
+  if (job && isActive(job)) return false;
+  if (!job) {
+    if (!r.status && !res) {
+      // Sólo trae un documento (resumen o minuta): el trabajo sale del disco.
+      const d = await api.jobFromDisk(r.path).catch(() => null);
+      if (!d) return false;
+      job = pushJob(jobFromDisk(d));
+    } else {
+      job = pushJob(newJob(r.path, r.name || fileName(r.path), r.sizeBytes ?? 0, r.durationSecs ?? null));
+    }
+  }
+  const at = r.at || Date.now();
+  if (r.sizeBytes) job.sizeBytes = r.sizeBytes;
+  if (typeof r.durationSecs === "number") job.durationSecs = r.durationSecs;
+  if (r.meta) {
+    const m = r.meta;
+    if (m.title?.trim()) job.meta.title = m.title;
+    if (m.date?.trim()) job.meta.date = m.date;
+    if (m.place?.trim()) job.meta.place = m.place;
+    if (m.participants?.trim()) job.meta.participants = m.participants;
+    if (m.notes?.trim()) job.meta.notes = m.notes;
+  }
+  job.updatedAt = at;
+  let finished = false;
+  switch (r.status) {
+    case "recording":
+    case "transcribing":
+      job.status = "external";
+      job.external = r.status;
+      job.percent = 0;
+      job.error = undefined;
+      job.startedAt = at;
+      job.finishedAt = undefined;
+      break;
+    case "recorded":
+      // Grabado y sin transcribir todavía (lo hará quien grabó, o el usuario desde aquí).
+      if (job.status === "external") {
+        job.status = "queued";
+        job.external = undefined;
+      }
+      break;
+    case "error":
+      // Si ya tenía una transcripción (se repetía por MCP), se conserva la anterior.
+      if (job.result) job.status = "done";
+      else {
+        job.status = /cancel/i.test(r.error ?? "") ? "cancelled" : "error";
+        job.error = r.error;
+      }
+      job.external = undefined;
+      job.finishedAt = at;
+      break;
+    case "done": {
+      // Sin segmentos en el registro (era demasiado grande): se leen del disco.
+      const result = res ?? (await api.jobFromDisk(job.path).catch(() => null))?.result ?? null;
+      if (result) {
+        job.result = { ...result, jobId: job.id };
+        job.status = "done";
+        job.percent = 100;
+        if (result.audioSecs) job.durationSecs = result.audioSecs;
+        job.finishedAt = at;
+        job.startedAt = at - (result.elapsedSecs || 0) * 1000;
+        job.error = undefined;
+        finished = true;
+      } else if (job.status === "external") {
+        job.status = "queued";
+      }
+      job.external = undefined;
+      break;
+    }
+  }
+  if (r.summaryPath) await loadDocInto(job, "summary", r.summaryPath);
+  if (r.minutesPath) await loadDocInto(job, "minutes", r.minutesPath);
+  if (!app.selectedJobId) app.selectedJobId = job.id;
+  return finished;
+}
+
+/** `iuretranscribe://open?path=…`: selecciona esa grabación; si no está en la lista, la toma del disco. */
+async function openRecording(path: string): Promise<void> {
+  await mergeInbox();
+  let job = app.jobs.find((j) => j.path === path);
+  if (!job) {
+    const d = await api.jobFromDisk(path).catch(() => null);
+    if (d) job = pushJob(jobFromDisk(d));
+    else {
+      // Sin transcripción todavía: queda en la cola, sin arrancarla.
+      const [added] = await addFiles([path]);
+      if (added && !added.sizeBytes && added.durationSecs == null) {
+        removeJob(added.id);
+      } else job = added;
+    }
+    if (!job) {
+      toast(t("toast.openNotFound", { path }), "error", 8000);
+      return;
+    }
+  } else if (job.result && (job.summary.status !== "done" || job.minutes.status !== "done")) {
+    try {
+      const docs = await api.loadDocuments(job.result.outputDir, job.result.baseName);
+      if (docs.summary && job.summary.status !== "done") job.summary = { status: "done", content: docs.summary.content, path: docs.summary.path };
+      if (docs.minutes && job.minutes.status !== "done") job.minutes = { status: "done", content: docs.minutes.content, path: docs.minutes.path };
+    } catch {
+      /* sin documentos */
+    }
+  }
+  app.view = "transcribe";
+  app.selectedJobId = job.id;
 }
 
 /** Toma del backend el idioma resuelto de la interfaz y las instrucciones predeterminadas. */
@@ -450,6 +665,11 @@ export async function init() {
   applyTheme();
   await restoreJobs();
   startPersistence();
+  restored = true;
+  // Lo grabado o transcrito por MCP mientras la ventana estaba cerrada, y lo que llegue después.
+  await mergeInbox();
+  setInterval(() => void mergeInbox(), 4000);
+  window.addEventListener("focus", () => void mergeInbox());
   refreshIureSession();
   refreshDiarReady();
   // Si se inició sesión en otra app de Iurefficient, al volver a esta ventana se toma
@@ -734,7 +954,7 @@ export function removeJob(id: string) {
 }
 
 export function clearFinished() {
-  app.jobs = app.jobs.filter((j) => isActive(j) || j.status === "queued");
+  app.jobs = app.jobs.filter((j) => isActive(j) || j.status === "queued" || j.status === "external");
   if (!app.jobs.some((j) => j.id === app.selectedJobId)) app.selectedJobId = app.jobs.at(-1)?.id ?? null;
 }
 

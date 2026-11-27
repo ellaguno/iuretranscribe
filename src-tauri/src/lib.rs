@@ -1,6 +1,7 @@
 mod audio;
 mod diarize;
 mod gpu;
+mod inbox;
 mod llm;
 mod mcp;
 mod models;
@@ -78,15 +79,17 @@ struct TranscribeRequest {
     path: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OutputFile {
     format: String,
     path: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+/// También es la forma del resultado en el buzón de trabajos (`inbox`): se lee de un
+/// archivo hostil, por eso todo tiene valor por omisión.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct TranscriptResult {
     job_id: String,
     segments: Vec<Segment>,
@@ -112,7 +115,7 @@ struct DocumentRequest {
     context: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DocumentResult {
     kind: String,
@@ -525,8 +528,14 @@ fn cancel_job(state: State<'_, AppState>, job_id: String) -> bool {
 
 #[tauri::command]
 async fn generate_document(state: State<'_, AppState>, request: DocumentRequest) -> Result<DocumentResult, String> {
-    let settings = state.settings.lock().unwrap().clone();
-    let (system, instruction, suffix) = match request.kind.as_str() {
+    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    write_document(&settings, &request.kind, &request.text, Path::new(&request.output_dir), &request.base_name, request.context.as_deref()).await
+}
+
+/// Resumen o minuta con las instrucciones y el modelo de OpenRouter de los ajustes; se
+/// escribe como `<base><sufijo>.md` en `output_dir`. La usan la ventana y el servidor MCP.
+async fn write_document(settings: &Settings, kind: &str, text: &str, output_dir: &Path, base_name: &str, context: Option<&str>) -> Result<DocumentResult, String> {
+    let (system, instruction, suffix) = match kind {
         "summary" => (
             settings.effective_summary_prompt(),
             lang::pick("Summarize the following transcription:", "Resume la siguiente transcripción:"),
@@ -539,21 +548,21 @@ async fn generate_document(state: State<'_, AppState>, request: DocumentRequest)
         ),
         other => return Err(tr!("Unknown document type: {other}", "Tipo de documento desconocido: {other}")),
     };
-    if request.text.trim().is_empty() {
+    if text.trim().is_empty() {
         return Err(tr!("The transcription is empty.", "La transcripción está vacía."));
     }
-    let user = match request.context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+    let user = match context.map(str::trim).filter(|c| !c.is_empty()) {
         Some(ctx) => tr!(
             "{instruction}\n\nDetails provided by the user about the meeting (use them and give them priority over what can be inferred from the audio):\n{ctx}\n\nTranscription:\n\n{}",
             "{instruction}\n\nDatos proporcionados por el usuario sobre la reunión (úsalos y dales prioridad sobre lo que se infiera del audio):\n{ctx}\n\nTranscripción:\n\n{}",
-            request.text
+            text
         ),
-        None => format!("{instruction}\n\n{}", request.text),
+        None => format!("{instruction}\n\n{text}"),
     };
     let content = llm::chat(&settings.openrouter_api_key, &settings.openrouter_model, &system, &user).await?;
-    let path = PathBuf::from(&request.output_dir).join(format!("{}{suffix}", request.base_name));
+    let path = output_dir.join(format!("{base_name}{suffix}"));
     std::fs::write(&path, format!("{content}\n")).map_err(|e| tr!("Could not write {}: {e}", "No se pudo escribir {}: {e}", path.display()))?;
-    Ok(DocumentResult { kind: request.kind, content, path: path.to_string_lossy().into_owned() })
+    Ok(DocumentResult { kind: kind.to_string(), content, path: path.to_string_lossy().into_owned() })
 }
 
 /// Lista de trabajos serializada por el frontend (se restaura al reiniciar).
@@ -588,19 +597,131 @@ fn doc_suffix(kind: &str) -> &'static str {
 /// (primero con el sufijo del idioma actual y después con el del otro idioma).
 #[tauri::command]
 fn load_documents(output_dir: String, base_name: String) -> DocumentsOnDisk {
+    documents_on_disk(Path::new(&output_dir), &base_name)
+}
+
+fn documents_on_disk(output_dir: &Path, base_name: &str) -> DocumentsOnDisk {
     let read = |kind: &str| {
         let suffixes: [&str; 2] = if kind == "summary" { ["_summary.md", "_resumen.md"] } else { ["_minutes.md", "_minuta.md"] };
         let current = doc_suffix(kind);
         let ordered = std::iter::once(current).chain(suffixes.into_iter().filter(|s| *s != current));
         ordered.into_iter().find_map(|suffix| {
-            let path = PathBuf::from(&output_dir).join(format!("{base_name}{suffix}"));
-            std::fs::read_to_string(&path)
-                .ok()
+            let path = output_dir.join(format!("{base_name}{suffix}"));
+            inbox::read_bounded(&path, MAX_TRANSCRIPT_BYTES)
+                .and_then(|b| String::from_utf8(b).ok())
                 .filter(|c| !c.trim().is_empty())
                 .map(|content| DocumentResult { kind: kind.into(), content, path: path.to_string_lossy().into_owned() })
         })
     };
     DocumentsOnDisk { summary: read("summary"), minutes: read("minutes") }
+}
+
+/// Transcripción más grande que esto no se lee del disco.
+const MAX_TRANSCRIPT_BYTES: u64 = 32 * 1024 * 1024;
+/// Extensiones de transcripción, de la más fiel (con hablantes) a la más pobre (sin horas).
+const TRANSCRIPT_EXTENSIONS: [&str; 4] = ["json", "srt", "vtt", "txt"];
+
+/// Transcripción `<base>.json|srt|vtt|txt` ya escrita en `dir`, sin volver a transcribir.
+fn transcript_in(dir: &Path, base_name: &str) -> Option<TranscriptResult> {
+    let mut outputs = Vec::new();
+    let mut segments: Option<Vec<Segment>> = None;
+    for ext in TRANSCRIPT_EXTENSIONS {
+        let path = dir.join(format!("{base_name}.{ext}"));
+        if !path.is_file() {
+            continue;
+        }
+        if segments.is_none() {
+            let text = inbox::read_bounded(&path, MAX_TRANSCRIPT_BYTES).and_then(|b| String::from_utf8(b).ok());
+            segments = text
+                .and_then(|t| match ext {
+                    "json" => subtitles::from_json(&t),
+                    "txt" => Some(subtitles::from_txt(&t)),
+                    _ => Some(subtitles::from_timed(&t)),
+                })
+                .filter(|s| !s.is_empty());
+        }
+        outputs.push(OutputFile { format: ext.into(), path: path.to_string_lossy().into_owned() });
+    }
+    let segments = segments?;
+    let audio_secs = segments.iter().map(|s| s.end_ms).max().unwrap_or(0).max(0) as f64 / 1000.0;
+    Some(TranscriptResult {
+        job_id: String::new(),
+        text: subtitles::to_plain(&segments),
+        segments,
+        audio_secs,
+        elapsed_secs: 0.0,
+        outputs,
+        output_dir: dir.to_string_lossy().into_owned(),
+        base_name: base_name.to_string(),
+        detected_language: None,
+    })
+}
+
+/// Transcripción ya escrita de un audio: en la carpeta de salida de los ajustes o junto al audio.
+fn saved_transcript(settings: &Settings, input: &Path) -> Option<TranscriptResult> {
+    let base = input.file_stem()?.to_string_lossy().into_owned();
+    let mut dirs = vec![resolve_output_dir(settings, input)];
+    if let Some(p) = input.parent().map(Path::to_path_buf).filter(|p| !dirs.contains(p)) {
+        dirs.push(p);
+    }
+    dirs.iter().find_map(|d| transcript_in(d, &base))
+}
+
+/// Un trabajo terminado reconstruido desde el disco (para `iuretranscribe://open?path=…`).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiskJob {
+    path: String,
+    name: String,
+    size_bytes: u64,
+    duration_secs: Option<f64>,
+    result: TranscriptResult,
+    summary: Option<DocumentResult>,
+    minutes: Option<DocumentResult>,
+}
+
+/// El audio y su transcripción ya escrita, con resumen y minuta si existen. `None` si
+/// todavía no hay transcripción (entonces la ventana lo agrega a la cola).
+#[tauri::command]
+async fn job_from_disk(state: State<'_, AppState>, path: String) -> Result<Option<DiskJob>, String> {
+    let settings = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let input = PathBuf::from(&path);
+        if !input.is_absolute() || !input.is_file() {
+            return None;
+        }
+        let result = saved_transcript(&settings, &input)?;
+        let docs = documents_on_disk(Path::new(&result.output_dir), &result.base_name);
+        Some(DiskJob {
+            name: input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone()),
+            size_bytes: std::fs::metadata(&input).map(|m| m.len()).unwrap_or(0),
+            duration_secs: audio::probe_duration(&input).or(Some(result.audio_secs)),
+            summary: docs.summary,
+            minutes: docs.minutes,
+            result,
+            path,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Carpeta del buzón de trabajos (junto a `jobs.json`).
+fn inbox_dir(jobs_path: &Path) -> PathBuf {
+    jobs_path.parent().map(Path::to_path_buf).unwrap_or_default().join(inbox::DIR_NAME)
+}
+
+/// Registros pendientes del buzón (grabaciones y transcripciones hechas por MCP).
+#[tauri::command]
+async fn inbox_take(state: State<'_, AppState>) -> Result<Vec<inbox::Entry>, String> {
+    let dir = inbox_dir(&state.jobs_path);
+    tauri::async_runtime::spawn_blocking(move || inbox::take(&dir)).await.map_err(|e| e.to_string())
+}
+
+/// Borra los registros ya aplicados; la ventana lo llama después de guardar `jobs.json`.
+#[tauri::command]
+fn inbox_ack(state: State<'_, AppState>, files: Vec<String>) -> usize {
+    inbox::ack(&inbox_dir(&state.jobs_path), &files)
 }
 
 fn recordings_dir(state: &AppState) -> PathBuf {
@@ -1449,6 +1570,8 @@ pub fn run_mcp() -> i32 {
             models_dir: data_dir.join("models"),
             bundled_models_dir,
             recordings_default: dirs::audio_dir().unwrap_or_else(|| data_dir.clone()).join("IureTranscribe"),
+            inbox_dir: (!data_dir.as_os_str().is_empty()).then(|| inbox_dir(&data_dir.join("jobs.json"))),
+            jobs_path: data_dir.join("jobs.json"),
         },
     )
 }
@@ -1638,6 +1761,9 @@ pub fn run() {
             load_jobs,
             save_jobs,
             load_documents,
+            job_from_disk,
+            inbox_take,
+            inbox_ack,
             iure_test_connection,
             iure_list,
             iure_upload,

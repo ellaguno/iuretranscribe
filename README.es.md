@@ -186,15 +186,22 @@ que el agente decide leer.
 
 | Herramienta | Qué hace |
 | --- | --- |
-| `transcribe_file` | Transcribe un audio o video, escribe los archivos (SRT/TXT… según Ajustes) junto al audio y devuelve el texto; con `timestamps`, cada línea con su hora |
+| `transcribe_file` | Transcribe un audio o video, escribe los archivos (SRT/TXT… según Ajustes) junto al audio y devuelve el texto; con `timestamps`, cada línea con su hora. Acepta los datos de la reunión (`title`, `date`, `place`, `participants`, `notes`) |
 | `transcription_status` | Si la transcripción es larga, `transcribe_file` devuelve un `jobId` a los ~50 s y el trabajo sigue: esta herramienta espera y devuelve el texto; también lee el resto con `offset` |
 | `read_transcript` | Lee una transcripción o una minuta ya existente, por partes |
 | `audio_info` | Duración, tamaño y transcripciones que ya existen de un archivo |
 | `list_recordings` | Las últimas grabaciones hechas con la app, con su duración y si ya están transcritas |
 | `transcription_setup` | Modelo, idioma, formatos y modelos descargados |
+| `generate_document` | Redacta el resumen (`kind: "summary"`) o la minuta (`"minutes"`) con las instrucciones y la llave de OpenRouter de la app, lo guarda junto a la transcripción (`<nombre>_resumen.md` / `_minuta.md`) y devuelve `{kind, path, content}`; sin IA configurada devuelve un error |
+| `start_recording`, `recording_status`, `pause_recording`, `stop_recording` | Graban una reunión sin abrir la ventana (los usa IureDesk) |
 
 Usa el modelo, el idioma, el vocabulario propio y las correcciones de Ajustes. El modelo tiene
 que estar descargado (sección Modelos). El registro va a `iuretranscribe-mcp.log`.
+
+Lo que se graba, transcribe o resume por MCP aparece en la lista de la ventana (aunque estuviera
+cerrada): el servidor deja cada cambio en `jobs-inbox/`, junto a `jobs.json`, y la ventana lo
+incorpora. Cada respuesta trae `openLink`, `iuretranscribe://open?path=<ruta del audio>`
+(también `abrir`), que abre esa grabación en la ventana sin volver a transcribirla.
 
 En **Ajustes → Asistentes de IA** la app detecta qué asistentes hay y conecta cada uno:
 

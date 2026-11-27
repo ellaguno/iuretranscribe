@@ -128,7 +128,7 @@
   // svelte-ignore state_referenced_locally
   let showMeta = $state(!metaFilledByUser(job.meta));
   let metaSummary = $derived(
-    [job.meta.date, job.meta.place, job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")]
+    [job.meta.title ?? "", job.meta.date, job.meta.place, job.meta.participants.split(/\n|,|;/).map((x) => x.trim()).filter(Boolean).join(", ")]
       .filter(Boolean)
       .join(" · "),
   );
@@ -339,7 +339,7 @@
     <div class="body scroll" bind:this={listEl}>
       {#if segments.length === 0}
         <div class="empty hint">
-          {#if job.status === "queued"}{t("detail.willAppear")}{:else if job.status === "error"}{job.error}{:else if isActive(job)}{t("detail.waitingSegments")}{:else}{t("detail.noText")}{/if}
+          {#if job.status === "queued"}{t("detail.willAppear")}{:else if job.status === "error"}{job.error}{:else if job.status === "external"}{t(job.external === "recording" ? "job.externalRecording" : "job.externalTranscribing")}{:else if isActive(job)}{t("detail.waitingSegments")}{:else}{t("detail.noText")}{/if}
         </div>
       {:else}
         {#each segments as s, i (i)}
